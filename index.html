@@ -375,6 +375,40 @@ a.button {
   line-height: 1.62;
 }
 
+.readout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.readout-grid div {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.readout-grid span,
+.readout-grid strong {
+  display: block;
+  font-family: var(--mono);
+  letter-spacing: 0;
+}
+
+.readout-grid span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.readout-grid strong {
+  margin-top: 5px;
+  color: #f5f5f7;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .cycle-head {
   display: flex;
   align-items: baseline;
@@ -722,6 +756,10 @@ textarea:focus {
     max-width: min(100%, 82vw);
     max-height: none;
   }
+
+  .readout-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
   </head>
@@ -762,6 +800,16 @@ textarea:focus {
               <strong id="cycleHint">等待首轮读取</strong>
             </div>
             <p id="stateDetail" class="state-detail">点击下方读取按钮，然后让右侧取景框覆盖源端画面。读取开始后，暂停按钮会变亮。</p>
+            <div class="readout-grid">
+              <div>
+                <span>画面状态</span>
+                <strong id="scanInfo">等待读取</strong>
+              </div>
+              <div>
+                <span>最近读到</span>
+                <strong id="lastStitch">尚未读到</strong>
+              </div>
+            </div>
           </div>
 
           <div class="section-title">操作</div>
@@ -11047,8 +11095,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   var meta = null;
   var stitches = new Map();
   var complete = false;
-  var scanLimit = 820;
+  var scanLimit = 1400;
   var lastStatusAt = 0;
+  var lastScanInfoAt = 0;
 
   var nodes = {
     video: document.querySelector("#loomView"),
@@ -11073,7 +11122,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     flow: document.querySelector("#flow"),
     cycle: document.querySelector("#cycle"),
     cycleHint: document.querySelector("#cycleHint"),
-    stateDetail: document.querySelector("#stateDetail")
+    stateDetail: document.querySelector("#stateDetail"),
+    scanInfo: document.querySelector("#scanInfo"),
+    lastStitch: document.querySelector("#lastStitch")
   };
 
   function setStatus(message) {
@@ -11085,6 +11136,17 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     if (now - lastStatusAt < 700) return;
     lastStatusAt = now;
     setStatus(message);
+  }
+
+  function setScanInfo(message, force) {
+    var now = Date.now();
+    if (!force && now - lastScanInfoAt < 500) return;
+    lastScanInfoAt = now;
+    nodes.scanInfo.textContent = message;
+  }
+
+  function setLastStitch(message) {
+    nodes.lastStitch.textContent = message;
   }
 
   function setFlow(active, done) {
@@ -11133,6 +11195,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.copy.disabled = true;
     nodes.fileName.textContent = "完成后显示文件名";
     if (nodes.checksum) nodes.checksum.textContent = "完成后显示校验结果";
+    setScanInfo("等待读取", true);
+    setLastStitch("尚未读到");
     nodes.mending.value = "读取后显示待补编号";
     nodes.mendingCode.value = "读取后显示可复制短码";
     nodes.copyMending.disabled = true;
@@ -11244,6 +11308,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   function accept(payload, rawText) {
     if (!payload) {
+      setScanInfo(rawText ? "看到了画面，但不是当前内容" : "还没看到清晰画面");
       setStatusSoon(rawText ? "已看到画面码，但不是当前 KnitKit 内容" : "正在读取");
       return;
     }
@@ -11259,16 +11324,25 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       };
       nodes.total.textContent = String(meta.total);
       nodes.progress.max = String(meta.total);
+      setScanInfo("已识别 KnitKit 内容", true);
       setStatus("正在读取");
       setFlow("loop", ["read"]);
       setCycle("read", [], "读取中，等待一轮结束");
     }
     if (payload.id !== activeId) {
+      setScanInfo("看到了另一批内容，请清空重来", true);
       setStatus("不是同一轮内容");
       return;
     }
     if (complete) return;
-    if (!stitches.has(payload.i)) stitches.set(payload.i, payload.b);
+    if (!stitches.has(payload.i)) {
+      stitches.set(payload.i, payload.b);
+      setLastStitch("第 " + String(payload.i + 1) + " 片");
+      setScanInfo("已读入新片段", true);
+    } else {
+      setLastStitch("第 " + String(payload.i + 1) + " 片已读过");
+      setScanInfo("读到重复片段，等待下一片");
+    }
     updateProgress();
     finish();
   }
@@ -11285,10 +11359,14 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       var height = video.videoHeight;
       var size = Math.min(width, height);
       var inset = Math.floor(size * 0.08);
+      var centerX = Math.floor((width - size) / 2);
+      var centerY = Math.floor((height - size) / 2);
       var areas = [
-        { x: Math.floor((width - size) / 2), y: Math.floor((height - size) / 2), width: size, height: size },
         { x: 0, y: 0, width: width, height: height },
-        { x: Math.floor((width - size) / 2) + inset, y: Math.floor((height - size) / 2) + inset, width: size - inset * 2, height: size - inset * 2 }
+        { x: centerX, y: centerY, width: size, height: size },
+        { x: centerX + inset, y: centerY + inset, width: size - inset * 2, height: size - inset * 2 },
+        { x: Math.max(0, centerX - inset), y: centerY, width: Math.min(size, width - Math.max(0, centerX - inset)), height: size },
+        { x: Math.min(width - size, centerX + inset), y: centerY, width: size, height: size }
       ];
       var rawSeen = "";
 
@@ -11301,7 +11379,13 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         canvas.height = targetHeight;
         ctx.drawImage(video, area.x, area.y, area.width, area.height, 0, 0, targetWidth, targetHeight);
         var image = ctx.getImageData(0, 0, targetWidth, targetHeight);
-        var result = window["js" + "Q" + "R"](image.data, image.width, image.height, { inversionAttempts: "attemptBoth" });
+        var reader = window["js" + "Q" + "R"];
+        if (typeof reader !== "function") {
+          setScanInfo("读取组件没有加载，请刷新页面", true);
+          setStatus("请刷新页面");
+          return;
+        }
+        var result = reader(image.data, image.width, image.height, { inversionAttempts: "attemptBoth" });
         if (result && result.data) {
           var payload = kit.parsePayload(result.data);
           if (payload) {
@@ -11312,6 +11396,10 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         }
       }
       accept(null, rawSeen);
+    } catch (error) {
+      console.error(error);
+      setScanInfo("读取循环异常，请刷新页面", true);
+      setStatus("读取异常");
     } finally {
       busy = false;
     }
@@ -11340,6 +11428,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       await nodes.video.play();
       nodes.start.disabled = true;
       nodes.stop.disabled = false;
+      setScanInfo("相机已打开，正在寻找画面", true);
+      setLastStitch("尚未读到");
       setStatus("正在读取");
       timer = window.requestAnimationFrame(keepLooking);
     } catch (error) {
