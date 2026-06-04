@@ -98,6 +98,16 @@ a.button {
   gap: 8px;
 }
 
+.guide {
+  padding: 12px;
+  border: 1px solid #e4d9c9;
+  border-radius: 6px;
+  background: #fbf7ef;
+  color: #4f473f;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .field label,
 .metric strong {
   font-weight: 700;
@@ -281,6 +291,8 @@ textarea.compact {
 
       <section class="workspace">
         <aside class="panel">
+          <div class="guide">Knitter 跑一轮时点 Read。Lap 变为 1 后点 Pause，复制 Mending Code；下一轮再点 Read。Clear 只用于新 Pattern。</div>
+
           <div class="actions">
             <button id="start" type="button">Read</button>
             <button id="stop" class="secondary" type="button" disabled>Pause</button>
@@ -302,8 +314,16 @@ textarea.compact {
           <div class="field">
             <label for="mendingList">Mending</label>
             <textarea id="mendingList" class="compact" readonly>-</textarea>
+          </div>
+
+          <div class="field">
+            <label for="mendingCode">Mending Code</label>
+            <textarea id="mendingCode" class="compact" readonly>-</textarea>
             <div class="actions">
-              <button id="copyMending" class="secondary" type="button" disabled>Copy Mending</button>
+              <button id="copyMending" class="secondary" type="button" disabled>Copy List</button>
+              <button id="copyMendingCode" class="secondary" type="button" disabled>Copy Code</button>
+            </div>
+            <div class="actions">
               <button id="clear" class="secondary" type="button">Clear</button>
             </div>
           </div>
@@ -10589,7 +10609,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     fileName: document.querySelector("#fileName"),
     checksum: document.querySelector("#checksum"),
     mending: document.querySelector("#mendingList"),
-    copyMending: document.querySelector("#copyMending")
+    mendingCode: document.querySelector("#mendingCode"),
+    copyMending: document.querySelector("#copyMending"),
+    copyMendingCode: document.querySelector("#copyMendingCode")
   };
 
   function setStatus(message) {
@@ -10613,7 +10635,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.fileName.textContent = "-";
     nodes.checksum.textContent = "-";
     nodes.mending.value = "-";
+    nodes.mendingCode.value = "-";
     nodes.copyMending.disabled = true;
+    nodes.copyMendingCode.disabled = true;
   }
 
   function mendingText() {
@@ -10644,6 +10668,16 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     return ranges.length ? ranges.join(", ") : "Complete";
   }
 
+  function mendingCode() {
+    if (!meta) return "-";
+    if (stitches.size >= meta.total) return "Complete";
+    var bytes = new Uint8Array(Math.ceil(meta.total / 8));
+    for (var index = 0; index < meta.total; index += 1) {
+      if (!stitches.has(index)) bytes[Math.floor(index / 8)] |= 1 << (index % 8);
+    }
+    return "K1:" + kit.toSafeBase64(bytes);
+  }
+
   function updateProgress() {
     var total = meta ? meta.total : 0;
     nodes.count.textContent = String(stitches.size);
@@ -10651,7 +10685,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.progress.max = String(Math.max(1, total));
     nodes.progress.value = String(stitches.size);
     nodes.mending.value = mendingText();
+    nodes.mendingCode.value = mendingCode();
     nodes.copyMending.disabled = !meta || complete || stitches.size >= total;
+    nodes.copyMendingCode.disabled = !meta || complete || stitches.size >= total;
   }
 
   async function finish() {
@@ -10805,7 +10841,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   });
   nodes.copyMending.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.mending.value);
-    setStatus("Mending copied");
+    setStatus("Mending list copied");
+  });
+  nodes.copyMendingCode.addEventListener("click", async function () {
+    await navigator.clipboard.writeText(nodes.mendingCode.value);
+    setStatus("Mending code copied");
   });
   window.addEventListener("beforeunload", function (event) {
     if (!complete && activeId && stitches.size > 0) {
