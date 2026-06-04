@@ -11116,6 +11116,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   var scanLimit = 1600;
   var lastStatusAt = 0;
   var lastScanInfoAt = 0;
+  var nativeDetector = null;
+  var nativeDetectorReady = false;
+  var nativeDetectorTried = false;
 
   var nodes = {
     video: document.querySelector("#loomView"),
@@ -11165,6 +11168,78 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   function setLastStitch(message) {
     nodes.lastStitch.textContent = message;
+  }
+
+  async function getNativeDetector() {
+    if (nativeDetectorReady) return nativeDetector;
+    if (nativeDetectorTried) return null;
+    nativeDetectorTried = true;
+    if (!("BarcodeDetector" in window)) return null;
+    try {
+      var formats = await window.BarcodeDetector.getSupportedFormats();
+      if (formats.indexOf("qr_code") === -1) return null;
+      nativeDetector = new window.BarcodeDetector({ formats: ["qr_code"] });
+      nativeDetectorReady = true;
+      return nativeDetector;
+    } catch (error) {
+      console.warn(error);
+      return null;
+    }
+  }
+
+  function runJsReader(image) {
+    var reader = window["js" + "Q" + "R"];
+    if (typeof reader !== "function") return null;
+    try {
+      var result = reader(image.data, image.width, image.height, { inversionAttempts: "attemptBoth" });
+      return result && result.data ? result.data : null;
+    } catch (error) {
+      console.warn(error);
+      return null;
+    }
+  }
+
+  function thresholdImage(image, invert) {
+    var out = new Uint8ClampedArray(image.data.length);
+    for (var index = 0; index < image.data.length; index += 4) {
+      var r = image.data[index];
+      var g = image.data[index + 1];
+      var b = image.data[index + 2];
+      var value = r * 0.299 + g * 0.587 + b * 0.114;
+      var bit = value > 150 ? 255 : 0;
+      if (invert) bit = 255 - bit;
+      out[index] = bit;
+      out[index + 1] = bit;
+      out[index + 2] = bit;
+      out[index + 3] = 255;
+    }
+    return new ImageData(out, image.width, image.height);
+  }
+
+  async function decodeCanvas(canvas, ctx) {
+    var detector = await getNativeDetector();
+    if (detector) {
+      try {
+        var detected = await detector.detect(canvas);
+        if (detected && detected.length && detected[0].rawValue) {
+          return { raw: detected[0].rawValue, method: "native" };
+        }
+      } catch (error) {
+        console.warn(error);
+      }
+    }
+
+    var image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    var raw = runJsReader(image);
+    if (raw) return { raw: raw, method: "jsQR 原图" };
+
+    raw = runJsReader(thresholdImage(image, false));
+    if (raw) return { raw: raw, method: "jsQR 黑白化" };
+
+    raw = runJsReader(thresholdImage(image, true));
+    if (raw) return { raw: raw, method: "jsQR 反色黑白化" };
+
+    return null;
   }
 
   function setFlow(active, done) {
@@ -11365,7 +11440,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     finish();
   }
 
-  function look() {
+  async function look() {
     if (!stream || complete || busy) return;
     busy = true;
     var video = nodes.video;
@@ -11418,21 +11493,15 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         canvas.width = targetWidth;
         canvas.height = targetHeight;
         ctx.drawImage(video, area.x, area.y, area.width, area.height, 0, 0, targetWidth, targetHeight);
-        var image = ctx.getImageData(0, 0, targetWidth, targetHeight);
-        var reader = window["js" + "Q" + "R"];
-        if (typeof reader !== "function") {
-          setScanInfo("读取组件没有加载，请刷新页面", true);
-          setStatus("请刷新页面");
-          return;
-        }
-        var result = reader(image.data, image.width, image.height, { inversionAttempts: "attemptBoth" });
-        if (result && result.data) {
-          var payload = kit.parsePayload(result.data);
+        var decoded = await decodeCanvas(canvas, ctx);
+        if (decoded && decoded.raw) {
+          var payload = kit.parsePayload(decoded.raw);
           if (payload) {
-            accept(payload, result.data);
+            setScanInfo("已识别，方式：" + decoded.method, true);
+            accept(payload, decoded.raw);
             return;
           }
-          rawSeen = result.data;
+          rawSeen = decoded.raw;
         }
       }
       accept(null, rawSeen);
