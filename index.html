@@ -350,7 +350,7 @@ a.button {
 
 .state-row span,
 .state-row strong,
-.state-actions span {
+.state-detail {
   font-family: var(--mono);
   letter-spacing: 0;
 }
@@ -367,35 +367,12 @@ a.button {
   line-height: 1.22;
 }
 
-.state-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.state-actions span {
-  min-height: 38px;
-  display: grid;
-  place-items: center;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.055);
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 720;
-  text-align: center;
-}
-
-.state-actions span.active {
-  color: #031207;
-  border-color: rgba(48, 209, 88, 0.86);
-  background: var(--green);
-  box-shadow: 0 0 0 5px rgba(48, 209, 88, 0.11);
-}
-
-.state-actions span.done {
-  color: rgba(245, 245, 247, 0.44);
+.state-detail {
+  margin: 0;
+  padding-top: 2px;
+  color: #c7c7cc;
+  font-size: 13px;
+  line-height: 1.62;
 }
 
 .cycle-head {
@@ -739,10 +716,6 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
-  .state-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .camera,
   canvas#swatch {
     width: min(100%, 82vw);
@@ -788,12 +761,7 @@ textarea:focus {
               <span>当前</span>
               <strong id="cycleHint">等待首轮读取</strong>
             </div>
-            <div class="state-actions">
-              <span data-cycle="read">可点：读取</span>
-              <span data-cycle="pause">可点：暂停</span>
-              <span data-cycle="copy">可点：复制短码</span>
-              <span data-cycle="repeat">可点：继续读取</span>
-            </div>
+            <p id="stateDetail" class="state-detail">点击下方读取按钮，然后让右侧取景框覆盖源端画面。读取开始后，暂停按钮会变亮。</p>
           </div>
 
           <div class="section-title">操作</div>
@@ -11104,7 +11072,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     copyMendingCode: document.querySelector("#copyMendingCode"),
     flow: document.querySelector("#flow"),
     cycle: document.querySelector("#cycle"),
-    cycleHint: document.querySelector("#cycleHint")
+    cycleHint: document.querySelector("#cycleHint"),
+    stateDetail: document.querySelector("#stateDetail")
   };
 
   function setStatus(message) {
@@ -11137,6 +11106,15 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       item.classList.toggle("done", completed.has(step));
     });
     if (hint) nodes.cycleHint.textContent = hint;
+    nodes.stateDetail.textContent = stateDetail(active, hint);
+  }
+
+  function stateDetail(active, hint) {
+    if (hint === "已收集完毕") return "文件已经还原完成，可以在文件区预览文本，或直接保存原文件。";
+    if (active === "copy") return "当前已经暂停。复制短码交给源端，让源端只播放缺少的片段。";
+    if (active === "repeat") return "短码交给源端后，先点下方读取按钮，再让源端开始下一轮。";
+    if (active === "pause") return "正在累计已识别的片段。一轮结束后点暂停，再复制短码给源端补齐。";
+    return "点击下方读取按钮，然后让右侧取景框覆盖源端画面。读取开始后，暂停按钮会变亮。";
   }
 
   function resetSkein() {
