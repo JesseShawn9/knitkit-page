@@ -11127,13 +11127,12 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   var nativeDetector = null;
   var nativeDetectorReady = false;
   var nativeDetectorTried = false;
-  var swatchWorker = null;
+  var swatchWorkers = [];
   var swatchWorkerUrl = "";
-  var workerBusy = false;
   var frameQueue = [];
   var lastCaptureAt = 0;
-  var captureEvery = 120;
-  var queueLimit = 12;
+  var captureEvery = 60;
+  var queueLimit = 96;
   var captureLimit = 1280;
 
   var nodes = {
@@ -11449,38 +11448,49 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   }
 
   function startSwatchWorker() {
-    if (swatchWorker) return true;
+    if (swatchWorkers.length) return true;
     if (!window.Worker || !window.Blob || !window.URL) return false;
     var source = readerSource();
     if (!source) return false;
     try {
       var blob = new Blob([source + "\n(" + workerRuntime.toString() + ")();"], { type: "text/javascript" });
       swatchWorkerUrl = URL.createObjectURL(blob);
-      swatchWorker = new Worker(swatchWorkerUrl);
-      swatchWorker.onmessage = function (event) {
-        workerBusy = false;
-        if (!stream || complete) {
-          frameQueue = [];
-          return;
-        }
-        var decoded = event.data || {};
-        if (decoded.raw) {
-          var payload = kit.parsePayload(decoded.raw);
-          if (payload) {
-            setScanInfo("已识别，方式：" + decoded.method, true);
-            accept(payload, decoded.raw);
-          } else {
-            accept(null, decoded.raw);
+      var cores = navigator.hardwareConcurrency || 8;
+      var count = cores >= 10 ? Math.max(6, Math.min(16, cores - 2)) : Math.max(2, Math.min(4, cores - 2));
+
+      function bindWorker(worker) {
+        worker.busy = false;
+        worker.onmessage = function (event) {
+          worker.busy = false;
+          if (!stream || complete) {
+            frameQueue = [];
+            return;
           }
-        } else {
-          accept(null, decoded.rawSeen || "");
-        }
-        drainFrames();
-      };
-      swatchWorker.onerror = function (error) {
-        console.warn(error);
-        stopSwatchWorker();
-      };
+          var decoded = event.data || {};
+          if (decoded.raw) {
+            var payload = kit.parsePayload(decoded.raw);
+            if (payload) {
+              setScanInfo("已识别，方式：" + decoded.method, true);
+              accept(payload, decoded.raw);
+            } else {
+              accept(null, decoded.raw);
+            }
+          } else {
+            accept(null, decoded.rawSeen || "");
+          }
+          drainFrames();
+        };
+        worker.onerror = function (error) {
+          console.warn(error);
+          stopSwatchWorker();
+        };
+      }
+
+      for (var index = 0; index < count; index += 1) {
+        var worker = new Worker(swatchWorkerUrl);
+        bindWorker(worker);
+        swatchWorkers.push(worker);
+      }
       return true;
     } catch (error) {
       console.warn(error);
@@ -11490,16 +11500,17 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   }
 
   function stopSwatchWorker() {
-    if (swatchWorker) swatchWorker.terminate();
-    swatchWorker = null;
-    workerBusy = false;
+    swatchWorkers.forEach(function (worker) {
+      worker.terminate();
+    });
+    swatchWorkers = [];
     frameQueue = [];
     if (swatchWorkerUrl) URL.revokeObjectURL(swatchWorkerUrl);
     swatchWorkerUrl = "";
   }
 
   function captureFrame() {
-    if (!swatchWorker || !stream || complete) return;
+    if (!swatchWorkers.length || !stream || complete) return;
     var now = Date.now();
     if (now - lastCaptureAt < captureEvery) return;
     lastCaptureAt = now;
@@ -11521,10 +11532,13 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   }
 
   function drainFrames() {
-    if (!swatchWorker || workerBusy || complete || !frameQueue.length) return;
-    var frame = frameQueue.shift();
-    workerBusy = true;
-    swatchWorker.postMessage(frame, [frame.buffer]);
+    if (!swatchWorkers.length || complete || !frameQueue.length) return;
+    swatchWorkers.forEach(function (worker) {
+      if (worker.busy || !frameQueue.length) return;
+      var frame = frameQueue.shift();
+      worker.busy = true;
+      worker.postMessage(frame, [frame.buffer]);
+    });
   }
 
   function lumaAt(data, index) {
@@ -11935,7 +11949,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   }
 
   function keepLooking() {
-    if (swatchWorker) {
+    if (swatchWorkers.length) {
       captureFrame();
       drainFrames();
     } else {
