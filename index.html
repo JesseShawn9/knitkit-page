@@ -18,6 +18,7 @@
   --text-muted: #77777d;
   --blue: #2997ff;
   --blue-strong: #0077ed;
+  --green: #30d158;
   --silver: #f5f5f7;
   --control: rgba(255, 255, 255, 0.09);
   --control-strong: rgba(255, 255, 255, 0.16);
@@ -196,6 +197,84 @@ a.button {
   font-size: 13px;
   line-height: 1.45;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.flow {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flow li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  column-gap: 10px;
+  align-items: center;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text-muted);
+}
+
+.flow li span {
+  grid-row: span 2;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-soft);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.flow li strong,
+.flow li em {
+  font-family: var(--mono);
+  font-style: normal;
+  letter-spacing: 0;
+}
+
+.flow li strong {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.flow li em {
+  margin-top: 2px;
+  color: inherit;
+  font-size: 12px;
+}
+
+.flow li.done {
+  color: #73737a;
+  background: rgba(255, 255, 255, 0.032);
+}
+
+.flow li.done span {
+  color: #73737a;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.flow li.active {
+  color: #f5f5f7;
+  border-color: rgba(48, 209, 88, 0.58);
+  background:
+    linear-gradient(180deg, rgba(48, 209, 88, 0.18), rgba(48, 209, 88, 0.055));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 4px rgba(48, 209, 88, 0.08);
+}
+
+.flow li.active span {
+  color: #031207;
+  background: var(--green);
 }
 
 .field label,
@@ -453,25 +532,33 @@ textarea:focus {
           <strong>KnitKit</strong>
           <span>Unraveler</span>
         </div>
-        <span id="status" class="hint">Ready</span>
+        <span id="status" class="hint">等待读取</span>
       </header>
 
       <section class="workspace">
         <aside class="panel">
-          <div class="guide">Knitter 跑一轮时点 Read。Lap 变为 1 后点 Pause，复制 Mending Code；下一轮再点 Read。Clear 只用于新 Pattern。</div>
+          <div class="guide">按绿色步骤操作；灰色表示已完成或等待。暂停后复制补洞短码，下一轮继续读取。</div>
+
+          <ol id="flow" class="flow" aria-label="接收端流程">
+            <li data-step="read" class="active"><span>1</span><strong>开始读取</strong><em>对准源端画面</em></li>
+            <li data-step="pause"><span>2</span><strong>一轮后暂停</strong><em>查看剩余缺口</em></li>
+            <li data-step="copy"><span>3</span><strong>复制短码</strong><em>发给源端填入</em></li>
+            <li data-step="mend"><span>4</span><strong>继续读取</strong><em>收集补洞片段</em></li>
+            <li data-step="done"><span>5</span><strong>完成保存</strong><em>预览或保存文件</em></li>
+          </ol>
 
           <div class="actions">
-            <button id="start" type="button">Read</button>
-            <button id="stop" class="secondary" type="button" disabled>Pause</button>
+            <button id="start" type="button">读取</button>
+            <button id="stop" class="secondary" type="button" disabled>暂停</button>
           </div>
 
           <div class="metrics">
             <div class="metric">
-              <strong>Gathered</strong>
+              <strong>已收集</strong>
               <span id="stitchCount">0</span>
             </div>
             <div class="metric">
-              <strong>Total</strong>
+              <strong>总片段</strong>
               <span id="stitchTotal">0</span>
             </div>
           </div>
@@ -479,41 +566,41 @@ textarea:focus {
           <progress id="progress" max="1" value="0"></progress>
 
           <div class="field">
-            <label for="mendingList">Mending</label>
-            <textarea id="mendingList" class="compact" readonly>-</textarea>
+            <label for="mendingList">待补编号</label>
+            <textarea id="mendingList" class="compact" readonly>读取后显示待补编号</textarea>
           </div>
 
           <div class="field">
-            <label for="mendingCode">Mending Code</label>
-            <textarea id="mendingCode" class="compact" readonly>-</textarea>
+            <label for="mendingCode">补洞短码</label>
+            <textarea id="mendingCode" class="compact" readonly>读取后显示可复制短码</textarea>
             <div class="actions">
-              <button id="copyMending" class="secondary" type="button" disabled>Copy List</button>
-              <button id="copyMendingCode" class="secondary" type="button" disabled>Copy Code</button>
+              <button id="copyMending" class="secondary" type="button" disabled>复制编号</button>
+              <button id="copyMendingCode" class="secondary" type="button" disabled>复制短码</button>
             </div>
             <div class="actions">
-              <button id="clear" class="secondary" type="button">Clear</button>
+              <button id="clear" class="secondary" type="button">清空重来</button>
             </div>
           </div>
 
           <div class="field">
-            <label>Pattern</label>
-            <div id="fileName" class="meta">-</div>
+            <label>文件</label>
+            <div id="fileName" class="meta">完成后显示文件名</div>
           </div>
           <div class="field">
-            <label>Fingerprint</label>
-            <div id="checksum" class="meta tiny">-</div>
+            <label>校验指纹</label>
+            <div id="checksum" class="meta tiny">完成后显示校验结果</div>
           </div>
 
           <div id="result" class="result" hidden>
             <textarea id="preview" readonly></textarea>
             <div class="actions">
-              <button id="copy" type="button" disabled>Copy</button>
-              <a id="download" class="button">Save</a>
+              <button id="copy" type="button" disabled>复制文本</button>
+              <a id="download" class="button">保存文件</a>
             </div>
           </div>
         </aside>
 
-        <section class="stage" aria-label="Reader">
+        <section class="stage" aria-label="读取画面">
           <div class="camera">
             <video id="loomView" playsinline muted></video>
             <div class="reticle"></div>
@@ -10778,11 +10865,21 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     mending: document.querySelector("#mendingList"),
     mendingCode: document.querySelector("#mendingCode"),
     copyMending: document.querySelector("#copyMending"),
-    copyMendingCode: document.querySelector("#copyMendingCode")
+    copyMendingCode: document.querySelector("#copyMendingCode"),
+    flow: document.querySelector("#flow")
   };
 
   function setStatus(message) {
     nodes.status.textContent = message;
+  }
+
+  function setFlow(active, done) {
+    var completed = new Set(done || []);
+    nodes.flow.querySelectorAll("li").forEach(function (item) {
+      var step = item.dataset.step;
+      item.classList.toggle("active", step === active);
+      item.classList.toggle("done", completed.has(step));
+    });
   }
 
   function resetSkein() {
@@ -10799,16 +10896,17 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.download.removeAttribute("href");
     nodes.download.removeAttribute("download");
     nodes.copy.disabled = true;
-    nodes.fileName.textContent = "-";
-    nodes.checksum.textContent = "-";
-    nodes.mending.value = "-";
-    nodes.mendingCode.value = "-";
+    nodes.fileName.textContent = "完成后显示文件名";
+    nodes.checksum.textContent = "完成后显示校验结果";
+    nodes.mending.value = "读取后显示待补编号";
+    nodes.mendingCode.value = "读取后显示可复制短码";
     nodes.copyMending.disabled = true;
     nodes.copyMendingCode.disabled = true;
+    setFlow("read", []);
   }
 
   function mendingText() {
-    if (!meta) return "-";
+    if (!meta) return "读取后显示待补编号";
     var ranges = [];
     var start = 0;
     var last = 0;
@@ -10832,12 +10930,12 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       }
     }
     closeRange();
-    return ranges.length ? ranges.join(", ") : "Complete";
+    return ranges.length ? ranges.join(", ") : "已全部收集";
   }
 
   function mendingCode() {
-    if (!meta) return "-";
-    if (stitches.size >= meta.total) return "Complete";
+    if (!meta) return "读取后显示可复制短码";
+    if (stitches.size >= meta.total) return "已全部收集";
     var bytes = new Uint8Array(Math.ceil(meta.total / 8));
     for (var index = 0; index < meta.total; index += 1) {
       if (!stitches.has(index)) bytes[Math.floor(index / 8)] |= 1 << (index % 8);
@@ -10855,12 +10953,14 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.mendingCode.value = mendingCode();
     nodes.copyMending.disabled = !meta || complete || stitches.size >= total;
     nodes.copyMendingCode.disabled = !meta || complete || stitches.size >= total;
+    if (meta && stitches.size > 0 && stitches.size < total) setFlow("pause", ["read"]);
   }
 
   async function finish() {
     if (!meta || complete || stitches.size !== meta.total) return;
     complete = true;
-    setStatus("Unraveling...");
+    setStatus("正在还原");
+    setFlow("done", ["read", "pause", "copy", "mend"]);
 
     try {
       var parts = [];
@@ -10888,15 +10988,16 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         nodes.preview.value = text.text;
         nodes.copy.disabled = false;
       } else {
-        nodes.preview.value = "This pattern is not text. Use Save instead.";
+        nodes.preview.value = "当前文件不是文本，请使用保存文件。";
         nodes.copy.disabled = true;
       }
       nodes.result.hidden = false;
-      setStatus("Complete");
+      setStatus("已完成");
+      setFlow("done", ["read", "pause", "copy", "mend"]);
     } catch (error) {
       console.error(error);
       complete = false;
-      setStatus("Could not unravel yet. Keep reading.");
+      setStatus("还原失败，请继续读取");
     }
   }
 
@@ -10914,10 +11015,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       };
       nodes.total.textContent = String(meta.total);
       nodes.progress.max = String(meta.total);
-      setStatus("Reading");
+      setStatus("正在读取");
+      setFlow("pause", ["read"]);
     }
     if (payload.id !== activeId) {
-      setStatus("Different skein");
+      setStatus("不是同一轮内容");
       return;
     }
     if (complete) return;
@@ -10956,7 +11058,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   async function startLooking() {
     if (complete) resetSkein();
-    setStatus("Opening camera...");
+    setStatus("正在打开相机");
+    setFlow(activeId ? "mend" : "read", activeId ? ["read", "pause", "copy"] : []);
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -10970,11 +11073,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       await nodes.video.play();
       nodes.start.disabled = true;
       nodes.stop.disabled = false;
-      setStatus("Reading");
+      setStatus("正在读取");
       timer = window.requestAnimationFrame(keepLooking);
     } catch (error) {
       console.error(error);
-      setStatus("Camera is not available. Open this page through HTTPS and allow access.");
+      setStatus("相机不可用，请使用 HTTPS 页面并允许访问");
     }
   }
 
@@ -10990,13 +11093,16 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.video.srcObject = null;
     nodes.start.disabled = false;
     nodes.stop.disabled = true;
-    if (!complete) setStatus("Paused");
+    if (!complete) {
+      setStatus("已暂停");
+      setFlow(meta && stitches.size ? "copy" : "read", meta && stitches.size ? ["read", "pause"] : []);
+    }
   }
 
   function clearAll() {
     stopLooking();
     resetSkein();
-    setStatus("Ready");
+    setStatus("等待读取");
   }
 
   nodes.start.addEventListener("click", startLooking);
@@ -11004,15 +11110,17 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   nodes.clear.addEventListener("click", clearAll);
   nodes.copy.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.preview.value);
-    setStatus("Copied");
+    setStatus("文本已复制");
   });
   nodes.copyMending.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.mending.value);
-    setStatus("Mending list copied");
+    setStatus("编号已复制");
+    setFlow("mend", ["read", "pause", "copy"]);
   });
   nodes.copyMendingCode.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.mendingCode.value);
-    setStatus("Mending code copied");
+    setStatus("短码已复制");
+    setFlow("mend", ["read", "pause", "copy"]);
   });
   window.addEventListener("beforeunload", function (event) {
     if (!complete && activeId && stitches.size > 0) {
@@ -11020,6 +11128,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       event.returnValue = "";
     }
   });
+  setFlow("read", []);
 })();
 </script>
   </body>
