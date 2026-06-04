@@ -64,11 +64,11 @@ a.button {
 }
 
 .workspace {
-  width: min(1180px, calc(100vw - 32px));
+  width: min(1560px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 24px 0 36px;
   display: grid;
-  grid-template-columns: minmax(300px, 390px) 1fr;
+  grid-template-columns: minmax(280px, 340px) 1fr;
   gap: 24px;
 }
 
@@ -180,8 +180,8 @@ progress {
 }
 
 canvas#swatch {
-  width: min(72vh, 100%);
-  max-width: 820px;
+  width: min(88vh, 100%);
+  max-width: 980px;
   height: auto;
   image-rendering: pixelated;
   border: 12px solid #fffaf2;
@@ -10534,10 +10534,12 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   var kit = window.KnitKit;
   var stream = null;
   var timer = 0;
+  var busy = false;
   var activeId = "";
   var meta = null;
   var stitches = new Map();
   var complete = false;
+  var scanLimit = 820;
 
   var nodes = {
     video: document.querySelector("#loomView"),
@@ -10652,20 +10654,31 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   }
 
   function look() {
-    if (!stream || complete) return;
+    if (!stream || complete || busy) return;
+    busy = true;
     var video = nodes.video;
-    if (!video.videoWidth || !video.videoHeight) return;
-    var canvas = nodes.canvas;
-    var size = Math.min(video.videoWidth, video.videoHeight);
-    var x = Math.floor((video.videoWidth - size) / 2);
-    var y = Math.floor((video.videoHeight - size) / 2);
-    canvas.width = size;
-    canvas.height = size;
-    var ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(video, x, y, size, size, 0, 0, size, size);
-    var image = ctx.getImageData(0, 0, size, size);
-    var result = window["js" + "Q" + "R"](image.data, image.width, image.height, { inversionAttempts: "dontInvert" });
-    if (result && result.data) accept(kit.parsePayload(result.data));
+    try {
+      if (!video.videoWidth || !video.videoHeight) return;
+      var canvas = nodes.canvas;
+      var size = Math.min(video.videoWidth, video.videoHeight);
+      var target = Math.min(scanLimit, size);
+      var x = Math.floor((video.videoWidth - size) / 2);
+      var y = Math.floor((video.videoHeight - size) / 2);
+      canvas.width = target;
+      canvas.height = target;
+      var ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(video, x, y, size, size, 0, 0, target, target);
+      var image = ctx.getImageData(0, 0, target, target);
+      var result = window["js" + "Q" + "R"](image.data, image.width, image.height, { inversionAttempts: "dontInvert" });
+      if (result && result.data) accept(kit.parsePayload(result.data));
+    } finally {
+      busy = false;
+    }
+  }
+
+  function keepLooking() {
+    look();
+    if (stream && !complete) timer = window.requestAnimationFrame(keepLooking);
   }
 
   async function startLooking() {
@@ -10685,7 +10698,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       nodes.start.disabled = true;
       nodes.stop.disabled = false;
       setStatus("Reading");
-      timer = window.setInterval(look, 160);
+      timer = window.requestAnimationFrame(keepLooking);
     } catch (error) {
       console.error(error);
       setStatus("Camera is not available. Open this page through HTTPS and allow access.");
@@ -10693,7 +10706,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   }
 
   function stopLooking() {
-    if (timer) window.clearInterval(timer);
+    if (timer) window.cancelAnimationFrame(timer);
     timer = 0;
     if (stream) {
       stream.getTracks().forEach(function (track) {
