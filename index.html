@@ -201,6 +201,24 @@ a.button {
   opacity: 0.28;
 }
 
+.stage:fullscreen {
+  padding: 2vmin;
+  border: 0;
+  border-radius: 0;
+  background: #050506;
+  box-shadow: none;
+}
+
+.stage:fullscreen::before {
+  display: none;
+}
+
+.stage:fullscreen canvas#swatch {
+  max-width: 96vmin;
+  max-height: 96vmin;
+  border-width: 12px;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -11095,7 +11113,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   var meta = null;
   var stitches = new Map();
   var complete = false;
-  var scanLimit = 1400;
+  var scanLimit = 1600;
   var lastStatusAt = 0;
   var lastScanInfoAt = 0;
 
@@ -11361,14 +11379,36 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       var inset = Math.floor(size * 0.08);
       var centerX = Math.floor((width - size) / 2);
       var centerY = Math.floor((height - size) / 2);
-      var areas = [
-        { x: 0, y: 0, width: width, height: height },
-        { x: centerX, y: centerY, width: size, height: size },
-        { x: centerX + inset, y: centerY + inset, width: size - inset * 2, height: size - inset * 2 },
-        { x: Math.max(0, centerX - inset), y: centerY, width: Math.min(size, width - Math.max(0, centerX - inset)), height: size },
-        { x: Math.min(width - size, centerX + inset), y: centerY, width: size, height: size }
-      ];
+      var areas = [];
       var rawSeen = "";
+
+      function addArea(x, y, areaWidth, areaHeight) {
+        x = Math.max(0, Math.min(width - 1, Math.round(x)));
+        y = Math.max(0, Math.min(height - 1, Math.round(y)));
+        areaWidth = Math.max(1, Math.min(width - x, Math.round(areaWidth)));
+        areaHeight = Math.max(1, Math.min(height - y, Math.round(areaHeight)));
+        var key = [x, y, areaWidth, areaHeight].join(":");
+        for (var areaIndex = 0; areaIndex < areas.length; areaIndex += 1) {
+          if (areas[areaIndex].key === key) return;
+        }
+        areas.push({ key: key, x: x, y: y, width: areaWidth, height: areaHeight });
+      }
+
+      function addSquare(centerRatioX, centerRatioY, side) {
+        side = Math.max(1, Math.min(width, height, Math.round(side)));
+        addArea(width * centerRatioX - side / 2, height * centerRatioY - side / 2, side, side);
+      }
+
+      addArea(0, 0, width, height);
+      addArea(centerX, centerY, size, size);
+      addArea(centerX + inset, centerY + inset, size - inset * 2, size - inset * 2);
+      [0.32, 0.5, 0.68].forEach(function (xRatio) {
+        addSquare(xRatio, 0.5, size * 0.82);
+        addSquare(xRatio, 0.5, size * 0.58);
+      });
+      [0.38, 0.62].forEach(function (yRatio) {
+        addSquare(0.5, yRatio, size * 0.7);
+      });
 
       for (var index = 0; index < areas.length; index += 1) {
         var area = areas[index];
