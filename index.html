@@ -10965,6 +10965,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   var stitches = new Map();
   var complete = false;
   var scanLimit = 820;
+  var lastStatusAt = 0;
 
   var nodes = {
     video: document.querySelector("#loomView"),
@@ -10993,6 +10994,13 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   function setStatus(message) {
     nodes.status.textContent = message;
+  }
+
+  function setStatusSoon(message) {
+    var now = Date.now();
+    if (now - lastStatusAt < 700) return;
+    lastStatusAt = now;
+    setStatus(message);
   }
 
   function setFlow(active, done) {
@@ -11141,8 +11149,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     }
   }
 
-  function accept(payload) {
-    if (!payload) return;
+  function accept(payload, rawText) {
+    if (!payload) {
+      setStatusSoon(rawText ? "已看到二维码，但不是当前 KnitKit 内容" : "正在读取");
+      return;
+    }
     if (!activeId) {
       activeId = payload.id;
       meta = {
@@ -11176,17 +11187,32 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     try {
       if (!video.videoWidth || !video.videoHeight) return;
       var canvas = nodes.canvas;
-      var size = Math.min(video.videoWidth, video.videoHeight);
-      var target = Math.min(scanLimit, size);
-      var x = Math.floor((video.videoWidth - size) / 2);
-      var y = Math.floor((video.videoHeight - size) / 2);
-      canvas.width = target;
-      canvas.height = target;
       var ctx = canvas.getContext("2d", { willReadFrequently: true });
-      ctx.drawImage(video, x, y, size, size, 0, 0, target, target);
-      var image = ctx.getImageData(0, 0, target, target);
-      var result = window["js" + "Q" + "R"](image.data, image.width, image.height, { inversionAttempts: "dontInvert" });
-      if (result && result.data) accept(kit.parsePayload(result.data));
+      var width = video.videoWidth;
+      var height = video.videoHeight;
+      var size = Math.min(width, height);
+      var inset = Math.floor(size * 0.08);
+      var areas = [
+        { x: Math.floor((width - size) / 2), y: Math.floor((height - size) / 2), width: size, height: size },
+        { x: 0, y: 0, width: width, height: height },
+        { x: Math.floor((width - size) / 2) + inset, y: Math.floor((height - size) / 2) + inset, width: size - inset * 2, height: size - inset * 2 }
+      ];
+
+      for (var index = 0; index < areas.length; index += 1) {
+        var area = areas[index];
+        var scale = Math.min(scanLimit / area.width, scanLimit / area.height, 1);
+        var targetWidth = Math.max(1, Math.round(area.width * scale));
+        var targetHeight = Math.max(1, Math.round(area.height * scale));
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        ctx.drawImage(video, area.x, area.y, area.width, area.height, 0, 0, targetWidth, targetHeight);
+        var image = ctx.getImageData(0, 0, targetWidth, targetHeight);
+        var result = window["js" + "Q" + "R"](image.data, image.width, image.height, { inversionAttempts: "attemptBoth" });
+        if (result && result.data) {
+          accept(kit.parsePayload(result.data), result.data);
+          return;
+        }
+      }
     } finally {
       busy = false;
     }
