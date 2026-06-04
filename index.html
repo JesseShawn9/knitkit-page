@@ -856,7 +856,7 @@ textarea:focus {
 
           <div class="section-title">文件</div>
           <div class="field">
-            <label>文件</label>
+            <label>名称</label>
             <div id="fileName" class="meta">完成后显示文件名</div>
           </div>
 
@@ -11121,6 +11121,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   var meta = null;
   var stitches = new Map();
   var complete = false;
+  var repairMode = false;
   var scanLimit = 1600;
   var lastStatusAt = 0;
   var lastScanInfoAt = 0;
@@ -11689,6 +11690,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   function stateDetail(active, hint) {
     if (hint === "已收集完毕") return "文件已经还原完成，可以在文件区预览文本，或直接保存原文件。";
+    if (hint === "首轮读取中") return "正在首轮累计片段。等源端完整播放一轮后，再点暂停查看是否需要补洞。";
+    if (hint === "补洞轮次读取中") return "正在读取补洞轮次，只累计之前缺少的片段。";
     if (active === "copy") return "当前已经暂停。复制短码交给源端，让源端只播放缺少的片段。";
     if (active === "repeat") return "短码交给源端后，先点下方读取按钮，再让源端开始下一轮。";
     if (active === "pause") return "正在累计已识别的片段。一轮结束后点暂停，再复制短码给源端补齐。";
@@ -11700,6 +11703,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     meta = null;
     stitches = new Map();
     complete = false;
+    repairMode = false;
     nodes.count.textContent = "0";
     nodes.total.textContent = "0";
     nodes.progress.value = "0";
@@ -11770,6 +11774,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.copyMending.disabled = !meta || complete || stitches.size >= total;
     nodes.copyMendingCode.disabled = !meta || complete || stitches.size >= total;
     if (meta && stitches.size > 0 && stitches.size < total) {
+      if (!repairMode) {
+        setFlow("read", []);
+        setCycle("read", [], "首轮读取中");
+        return;
+      }
       setFlow("loop", ["read"]);
       setCycle("pause", ["read"], "一轮后暂停并复制短码");
     }
@@ -11842,8 +11851,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       nodes.progress.max = String(meta.total);
       setScanInfo("已识别 KnitKit 内容", true);
       setStatus("正在读取");
-      setFlow("loop", ["read"]);
-      setCycle("read", [], "读取中，等待一轮结束");
+      setFlow(repairMode ? "loop" : "read", repairMode ? ["read"] : []);
+      setCycle("read", [], repairMode ? "补洞轮次读取中" : "首轮读取中");
     }
     if (payload.id !== activeId) {
       setScanInfo("看到了另一批内容，请清空重来", true);
@@ -11961,8 +11970,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   async function startLooking() {
     if (complete) resetSkein();
     setStatus("正在打开相机");
-    setFlow(activeId ? "loop" : "read", activeId ? ["read"] : []);
-    setCycle(activeId ? "repeat" : "read", activeId ? ["read", "pause", "copy"] : [], activeId ? "继续读取补洞轮次" : "对准源端画面");
+    setFlow(activeId && repairMode ? "loop" : "read", activeId && repairMode ? ["read"] : []);
+    setCycle(activeId && repairMode ? "repeat" : "read", activeId && repairMode ? ["read", "pause", "copy"] : [], activeId && repairMode ? "继续读取补洞轮次" : "对准源端画面");
     try {
       var workerReady = startSwatchWorker();
       stream = await navigator.mediaDevices.getUserMedia({
@@ -12001,6 +12010,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.start.disabled = false;
     nodes.stop.disabled = true;
     if (!complete) {
+      if (meta && stitches.size) repairMode = true;
       setStatus("已暂停");
       setFlow(meta && stitches.size ? "loop" : "read", meta && stitches.size ? ["read"] : []);
       setCycle(meta && stitches.size ? "copy" : "read", meta && stitches.size ? ["read", "pause"] : [], meta && stitches.size ? "复制短码并交给源端" : "先完成首轮读取");
@@ -12022,12 +12032,14 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   });
   nodes.copyMending.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.mending.value);
+    repairMode = true;
     setStatus("编号已复制");
     setFlow("loop", ["read"]);
     setCycle("repeat", ["read", "pause", "copy"], "把内容交给源端后继续读取");
   });
   nodes.copyMendingCode.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.mendingCode.value);
+    repairMode = true;
     setStatus("短码已复制");
     setFlow("loop", ["read"]);
     setCycle("repeat", ["read", "pause", "copy"], "把短码交给源端后继续读取");
