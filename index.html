@@ -138,6 +138,10 @@ input[type="range"] {
   gap: 10px;
 }
 
+.actions.trio {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 button,
 a.button {
   border: 0;
@@ -273,9 +277,10 @@ textarea.compact {
 
       <section class="workspace">
         <aside class="panel">
-          <div class="actions">
+          <div class="actions trio">
             <button id="start" type="button">Read</button>
             <button id="stop" class="secondary" type="button" disabled>Pause</button>
+            <button id="clear" class="secondary" type="button">Clear</button>
           </div>
 
           <div class="metrics">
@@ -10566,6 +10571,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     canvas: document.querySelector("#readerCanvas"),
     start: document.querySelector("#start"),
     stop: document.querySelector("#stop"),
+    clear: document.querySelector("#clear"),
     status: document.querySelector("#status"),
     count: document.querySelector("#stitchCount"),
     total: document.querySelector("#stitchTotal"),
@@ -10701,7 +10707,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       nodes.progress.max = String(meta.total);
       setStatus("Reading");
     }
-    if (payload.id !== activeId || complete) return;
+    if (payload.id !== activeId) {
+      setStatus("Different skein");
+      return;
+    }
+    if (complete) return;
     if (!stitches.has(payload.i)) stitches.set(payload.i, payload.b);
     updateProgress();
     finish();
@@ -10736,7 +10746,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   }
 
   async function startLooking() {
-    resetSkein();
+    if (complete) resetSkein();
     setStatus("Opening camera...");
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -10774,15 +10784,28 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     if (!complete) setStatus("Paused");
   }
 
+  function clearAll() {
+    stopLooking();
+    resetSkein();
+    setStatus("Ready");
+  }
+
   nodes.start.addEventListener("click", startLooking);
   nodes.stop.addEventListener("click", stopLooking);
+  nodes.clear.addEventListener("click", clearAll);
   nodes.copy.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.preview.value);
     setStatus("Copied");
   });
   nodes.copyMending.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.mending.value);
-    setStatus("Copied");
+    setStatus("Mending copied");
+  });
+  window.addEventListener("beforeunload", function (event) {
+    if (!complete && activeId && stitches.size > 0) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
   });
 })();
 </script>
