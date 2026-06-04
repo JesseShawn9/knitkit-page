@@ -111,6 +111,15 @@ input[type="file"] {
   background: #fff;
 }
 
+input[type="text"] {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #c9baa5;
+  border-radius: 6px;
+  background: #fff;
+  color: #24211d;
+}
+
 input[type="range"] {
   width: 100%;
   accent-color: #2f6f68;
@@ -231,6 +240,11 @@ textarea {
   color: #24211d;
 }
 
+textarea.compact {
+  min-height: 78px;
+  font-size: 13px;
+}
+
 .tiny {
   overflow-wrap: anywhere;
   font-size: 12px;
@@ -276,6 +290,12 @@ textarea {
           </div>
 
           <progress id="progress" max="1" value="0"></progress>
+
+          <div class="field">
+            <label for="mendingList">Mending</label>
+            <textarea id="mendingList" class="compact" readonly>-</textarea>
+            <button id="copyMending" class="secondary" type="button" disabled>Copy Mending</button>
+          </div>
 
           <div class="field">
             <label>Pattern</label>
@@ -10555,7 +10575,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     copy: document.querySelector("#copy"),
     download: document.querySelector("#download"),
     fileName: document.querySelector("#fileName"),
-    checksum: document.querySelector("#checksum")
+    checksum: document.querySelector("#checksum"),
+    mending: document.querySelector("#mendingList"),
+    copyMending: document.querySelector("#copyMending")
   };
 
   function setStatus(message) {
@@ -10578,6 +10600,36 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.copy.disabled = true;
     nodes.fileName.textContent = "-";
     nodes.checksum.textContent = "-";
+    nodes.mending.value = "-";
+    nodes.copyMending.disabled = true;
+  }
+
+  function mendingText() {
+    if (!meta) return "-";
+    var ranges = [];
+    var start = 0;
+    var last = 0;
+    var open = false;
+
+    function closeRange() {
+      if (!open) return;
+      ranges.push(start === last ? String(start + 1) : String(start + 1) + "-" + String(last + 1));
+      open = false;
+    }
+
+    for (var index = 0; index < meta.total; index += 1) {
+      if (stitches.has(index)) {
+        closeRange();
+      } else if (!open) {
+        start = index;
+        last = index;
+        open = true;
+      } else {
+        last = index;
+      }
+    }
+    closeRange();
+    return ranges.length ? ranges.join(", ") : "Complete";
   }
 
   function updateProgress() {
@@ -10586,6 +10638,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.total.textContent = String(total);
     nodes.progress.max = String(Math.max(1, total));
     nodes.progress.value = String(stitches.size);
+    nodes.mending.value = mendingText();
+    nodes.copyMending.disabled = !meta || complete || stitches.size >= total;
   }
 
   async function finish() {
@@ -10724,6 +10778,10 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   nodes.stop.addEventListener("click", stopLooking);
   nodes.copy.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.preview.value);
+    setStatus("Copied");
+  });
+  nodes.copyMending.addEventListener("click", async function () {
+    await navigator.clipboard.writeText(nodes.mending.value);
     setStatus("Copied");
   });
 })();
