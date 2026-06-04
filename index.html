@@ -11049,7 +11049,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       k: protocolMark,
       v: 1,
       id: meta.id,
-      n: meta.name,
+      n: "pattern.bin",
+      nb: toSafeBase64(encoder.encode(meta.name)),
       s: meta.size,
       h: meta.hash,
       z: meta.zipped ? 1 : 0,
@@ -11066,6 +11067,13 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       if (typeof payload.id !== "string" || typeof payload.b !== "string") return null;
       if (!Number.isFinite(payload.t) || !Number.isFinite(payload.i)) return null;
       if (payload.i < 0 || payload.i >= payload.t) return null;
+      if (typeof payload.nb === "string") {
+        try {
+          payload.n = decoder.decode(fromSafeBase64(payload.nb));
+        } catch (error) {
+          payload.n = "pattern.bin";
+        }
+      }
       return payload;
     } catch (error) {
       return null;
@@ -11187,26 +11195,98 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     }
   }
 
-  function runJsReader(image) {
+  function getJsReader() {
     var reader = window["js" + "Q" + "R"];
+    if (typeof reader === "function") return reader;
+    if (reader && typeof reader.default === "function") return reader.default;
+    return null;
+  }
+
+  function runJsReader(image) {
+    var reader = getJsReader();
     if (typeof reader !== "function") return null;
     try {
       var result = reader(image.data, image.width, image.height, { inversionAttempts: "attemptBoth" });
-      return result && result.data ? result.data : null;
+      if (!result) return null;
+      if (result.data) return result.data;
+      if (result.binaryData && result.binaryData.length) {
+        return kit.decoder.decode(new Uint8Array(result.binaryData));
+      }
+      return null;
     } catch (error) {
       console.warn(error);
       return null;
     }
   }
 
-  function thresholdImage(image, invert) {
+  function lumaAt(data, index) {
+    return data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+  }
+
+  function imageStats(image) {
+    var min = 255;
+    var max = 0;
+    var sum = 0;
+    var count = 0;
+    var step = Math.max(4, Math.floor(image.data.length / 12000 / 4) * 4);
+    for (var index = 0; index < image.data.length; index += step) {
+      var value = lumaAt(image.data, index);
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+      sum += value;
+      count += 1;
+    }
+    return {
+      min: min,
+      max: max,
+      mean: count ? sum / count : 128,
+      mid: (min + max) / 2
+    };
+  }
+
+  function thresholdImage(image, threshold, invert) {
+    var out = new Uint8ClampedArray(image.data.length);
+    for (var index = 0; index < image.data.length; index += 4) {
+      var value = lumaAt(image.data, index);
+      var bit = value > threshold ? 255 : 0;
+      if (invert) bit = 255 - bit;
+      out[index] = bit;
+      out[index + 1] = bit;
+      out[index + 2] = bit;
+      out[index + 3] = 255;
+    }
+    return new ImageData(out, image.width, image.height);
+  }
+
+  function stretchImage(image, stats, invert) {
+    var out = new Uint8ClampedArray(image.data.length);
+    var low = stats.min;
+    var high = stats.max;
+    var range = Math.max(24, high - low);
+    for (var index = 0; index < image.data.length; index += 4) {
+      var value = Math.max(0, Math.min(255, (lumaAt(image.data, index) - low) * 255 / range));
+      if (invert) value = 255 - value;
+      out[index] = value;
+      out[index + 1] = value;
+      out[index + 2] = value;
+      out[index + 3] = 255;
+    }
+    return new ImageData(out, image.width, image.height);
+  }
+
+  function colorMaskImage(image, threshold, invert) {
     var out = new Uint8ClampedArray(image.data.length);
     for (var index = 0; index < image.data.length; index += 4) {
       var r = image.data[index];
       var g = image.data[index + 1];
       var b = image.data[index + 2];
-      var value = r * 0.299 + g * 0.587 + b * 0.114;
-      var bit = value > 150 ? 255 : 0;
+      var max = Math.max(r, g, b);
+      var min = Math.min(r, g, b);
+      var luma = r * 0.299 + g * 0.587 + b * 0.114;
+      var chroma = max - min;
+      var blueGap = (r + g) / 2 - b;
+      var score = (255 - luma) * 0.9 + chroma * 1.4 + blueGap * 0.8;
+      var bit = score > threshold ? 0 : 255;
       if (invert) bit = 255 - bit;
       out[index] = bit;
       out[index + 1] = bit;
@@ -11233,11 +11313,32 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     var raw = runJsReader(image);
     if (raw) return { raw: raw, method: "jsQR 原图" };
 
-    raw = runJsReader(thresholdImage(image, false));
-    if (raw) return { raw: raw, method: "jsQR 黑白化" };
+    var stats = imageStats(image);
+    var stretched = stretchImage(image, stats, false);
+    raw = runJsReader(stretched);
+    if (raw) return { raw: raw, method: "jsQR 拉伸" };
 
-    raw = runJsReader(thresholdImage(image, true));
-    if (raw) return { raw: raw, method: "jsQR 反色黑白化" };
+    var colorThresholds = [32, 40, 50, 64, 82, 104];
+    for (var colorIndex = 0; colorIndex < colorThresholds.length; colorIndex += 1) {
+      raw = runJsReader(colorMaskImage(image, colorThresholds[colorIndex], false));
+      if (raw) return { raw: raw, method: "jsQR 颜色增强 " + colorThresholds[colorIndex] };
+
+      raw = runJsReader(colorMaskImage(image, colorThresholds[colorIndex], true));
+      if (raw) return { raw: raw, method: "jsQR 反色颜色增强 " + colorThresholds[colorIndex] };
+    }
+
+    var thresholds = [stats.mid, stats.mean, 96, 120, 144, 168, 192];
+    for (var index = 0; index < thresholds.length; index += 1) {
+      var threshold = Math.max(40, Math.min(220, thresholds[index]));
+      raw = runJsReader(thresholdImage(image, threshold, false));
+      if (raw) return { raw: raw, method: "jsQR 黑白化 " + Math.round(threshold) };
+
+      raw = runJsReader(thresholdImage(image, threshold, true));
+      if (raw) return { raw: raw, method: "jsQR 反色黑白化 " + Math.round(threshold) };
+    }
+
+    raw = runJsReader(stretchImage(image, stats, true));
+    if (raw) return { raw: raw, method: "jsQR 反色拉伸" };
 
     return null;
   }
@@ -11488,20 +11589,31 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       for (var index = 0; index < areas.length; index += 1) {
         var area = areas[index];
         var scale = Math.min(scanLimit / area.width, scanLimit / area.height, 1);
-        var targetWidth = Math.max(1, Math.round(area.width * scale));
-        var targetHeight = Math.max(1, Math.round(area.height * scale));
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        ctx.drawImage(video, area.x, area.y, area.width, area.height, 0, 0, targetWidth, targetHeight);
-        var decoded = await decodeCanvas(canvas, ctx);
-        if (decoded && decoded.raw) {
-          var payload = kit.parsePayload(decoded.raw);
-          if (payload) {
-            setScanInfo("已识别，方式：" + decoded.method, true);
-            accept(payload, decoded.raw);
-            return;
+        var baseWidth = Math.max(1, Math.round(area.width * scale));
+        var baseHeight = Math.max(1, Math.round(area.height * scale));
+        var renderPlans = [
+          { width: baseWidth, height: baseHeight, pad: 0 },
+          { width: Math.max(1, Math.round(baseWidth * 0.82)), height: Math.max(1, Math.round(baseHeight * 0.82)), pad: 28 },
+          { width: Math.max(1, Math.round(baseWidth * 1.12)), height: Math.max(1, Math.round(baseHeight * 1.12)), pad: 36 }
+        ];
+
+        for (var planIndex = 0; planIndex < renderPlans.length; planIndex += 1) {
+          var plan = renderPlans[planIndex];
+          canvas.width = plan.width + plan.pad * 2;
+          canvas.height = plan.height + plan.pad * 2;
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(video, area.x, area.y, area.width, area.height, plan.pad, plan.pad, plan.width, plan.height);
+          var decoded = await decodeCanvas(canvas, ctx);
+          if (decoded && decoded.raw) {
+            var payload = kit.parsePayload(decoded.raw);
+            if (payload) {
+              setScanInfo("已识别，方式：" + decoded.method, true);
+              accept(payload, decoded.raw);
+              return;
+            }
+            rawSeen = decoded.raw;
           }
-          rawSeen = decoded.raw;
         }
       }
       accept(null, rawSeen);
