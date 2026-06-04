@@ -171,6 +171,10 @@ a.button:not([href]) {
   gap: 10px;
 }
 
+.metrics.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .metric {
   padding: 12px;
   border: 1px solid #e4d9c9;
@@ -277,10 +281,9 @@ textarea.compact {
 
       <section class="workspace">
         <aside class="panel">
-          <div class="actions trio">
+          <div class="actions">
             <button id="start" type="button">Read</button>
             <button id="stop" class="secondary" type="button" disabled>Pause</button>
-            <button id="clear" class="secondary" type="button">Clear</button>
           </div>
 
           <div class="metrics">
@@ -299,7 +302,10 @@ textarea.compact {
           <div class="field">
             <label for="mendingList">Mending</label>
             <textarea id="mendingList" class="compact" readonly>-</textarea>
-            <button id="copyMending" class="secondary" type="button" disabled>Copy Mending</button>
+            <div class="actions">
+              <button id="copyMending" class="secondary" type="button" disabled>Copy Mending</button>
+              <button id="clear" class="secondary" type="button">Clear</button>
+            </div>
           </div>
 
           <div class="field">
