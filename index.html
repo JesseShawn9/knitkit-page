@@ -277,6 +277,95 @@ a.button {
   background: var(--green);
 }
 
+.cycle {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(48, 209, 88, 0.22);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(48, 209, 88, 0.08), rgba(48, 209, 88, 0.025));
+}
+
+.cycle-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cycle-head strong,
+.cycle-head span,
+.cycle-track span {
+  font-family: var(--mono);
+  letter-spacing: 0;
+}
+
+.cycle-head strong {
+  color: #f5f5f7;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.cycle-head span {
+  color: var(--text-soft);
+  font-size: 12px;
+  text-align: right;
+}
+
+.cycle-track {
+  display: grid;
+  grid-template-columns: 1fr 18px 1fr 18px 1fr 18px 1fr;
+  align-items: center;
+  gap: 6px;
+}
+
+.cycle-track span {
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.cycle-track span.active {
+  color: #031207;
+  border-color: rgba(48, 209, 88, 0.86);
+  background: var(--green);
+  box-shadow: 0 0 0 4px rgba(48, 209, 88, 0.1);
+}
+
+.cycle-track span.done {
+  color: #73737a;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.cycle-track i {
+  width: 18px;
+  height: 1px;
+  display: block;
+  position: relative;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.cycle-track i::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  right: 0;
+  width: 7px;
+  height: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.32);
+  border-right: 1px solid rgba(255, 255, 255, 0.32);
+  transform: rotate(45deg);
+}
+
 .field label,
 .metric strong {
   font-family: var(--mono);
@@ -522,6 +611,23 @@ textarea:focus {
   .metrics.three {
     grid-template-columns: 1fr 1fr 1fr;
   }
+
+  .cycle-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cycle-head span {
+    text-align: left;
+  }
+
+  .cycle-track {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cycle-track i {
+    display: none;
+  }
 }
 </style>
   </head>
@@ -537,15 +643,29 @@ textarea:focus {
 
       <section class="workspace">
         <aside class="panel">
-          <div class="guide">按绿色步骤操作；灰色表示已完成或等待。暂停后复制补洞短码，下一轮继续读取。</div>
+          <div class="guide">先完成首轮读取；之后就在补洞循环里重复：暂停、复制短码、继续读取，直到完成。</div>
 
           <ol id="flow" class="flow" aria-label="接收端流程">
-            <li data-step="read" class="active"><span>1</span><strong>开始读取</strong><em>对准源端画面</em></li>
-            <li data-step="pause"><span>2</span><strong>一轮后暂停</strong><em>查看剩余缺口</em></li>
-            <li data-step="copy"><span>3</span><strong>复制短码</strong><em>发给源端填入</em></li>
-            <li data-step="mend"><span>4</span><strong>继续读取</strong><em>收集补洞片段</em></li>
-            <li data-step="done"><span>5</span><strong>完成保存</strong><em>预览或保存文件</em></li>
+            <li data-step="read" class="active"><span>1</span><strong>首轮读取</strong><em>对准源端画面</em></li>
+            <li data-step="loop"><span>∞</span><strong>补洞循环</strong><em>暂停后复制短码</em></li>
+            <li data-step="done"><span>✓</span><strong>完成保存</strong><em>预览或保存文件</em></li>
           </ol>
+
+          <div id="cycle" class="cycle" aria-label="补洞循环">
+            <div class="cycle-head">
+              <strong>循环轮次</strong>
+              <span id="cycleHint">先完成首轮读取</span>
+            </div>
+            <div class="cycle-track">
+              <span data-cycle="read">读取一轮</span>
+              <i></i>
+              <span data-cycle="pause">暂停查看</span>
+              <i></i>
+              <span data-cycle="copy">复制短码</span>
+              <i></i>
+              <span data-cycle="repeat">继续读取</span>
+            </div>
+          </div>
 
           <div class="actions">
             <button id="start" type="button">读取</button>
@@ -10866,7 +10986,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     mendingCode: document.querySelector("#mendingCode"),
     copyMending: document.querySelector("#copyMending"),
     copyMendingCode: document.querySelector("#copyMendingCode"),
-    flow: document.querySelector("#flow")
+    flow: document.querySelector("#flow"),
+    cycle: document.querySelector("#cycle"),
+    cycleHint: document.querySelector("#cycleHint")
   };
 
   function setStatus(message) {
@@ -10874,12 +10996,24 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   }
 
   function setFlow(active, done) {
+    var aliases = { pause: "loop", copy: "loop", mend: "loop" };
+    active = aliases[active] || active;
     var completed = new Set(done || []);
     nodes.flow.querySelectorAll("li").forEach(function (item) {
       var step = item.dataset.step;
       item.classList.toggle("active", step === active);
+      item.classList.toggle("done", completed.has(step) || (step === "loop" && (completed.has("pause") || completed.has("copy") || completed.has("mend"))));
+    });
+  }
+
+  function setCycle(active, done, hint) {
+    var completed = new Set(done || []);
+    nodes.cycle.querySelectorAll("[data-cycle]").forEach(function (item) {
+      var step = item.dataset.cycle;
+      item.classList.toggle("active", step === active);
       item.classList.toggle("done", completed.has(step));
     });
+    if (hint) nodes.cycleHint.textContent = hint;
   }
 
   function resetSkein() {
@@ -10903,6 +11037,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.copyMending.disabled = true;
     nodes.copyMendingCode.disabled = true;
     setFlow("read", []);
+    setCycle("read", [], "先完成首轮读取");
   }
 
   function mendingText() {
@@ -10953,14 +11088,18 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.mendingCode.value = mendingCode();
     nodes.copyMending.disabled = !meta || complete || stitches.size >= total;
     nodes.copyMendingCode.disabled = !meta || complete || stitches.size >= total;
-    if (meta && stitches.size > 0 && stitches.size < total) setFlow("pause", ["read"]);
+    if (meta && stitches.size > 0 && stitches.size < total) {
+      setFlow("loop", ["read"]);
+      setCycle("pause", ["read"], "一轮后暂停并复制短码");
+    }
   }
 
   async function finish() {
     if (!meta || complete || stitches.size !== meta.total) return;
     complete = true;
     setStatus("正在还原");
-    setFlow("done", ["read", "pause", "copy", "mend"]);
+    setFlow("done", ["read", "loop"]);
+    setCycle("repeat", ["read", "pause", "copy"], "已收集完毕");
 
     try {
       var parts = [];
@@ -10993,7 +11132,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       }
       nodes.result.hidden = false;
       setStatus("已完成");
-      setFlow("done", ["read", "pause", "copy", "mend"]);
+      setFlow("done", ["read", "loop"]);
+      setCycle("repeat", ["read", "pause", "copy"], "已收集完毕");
     } catch (error) {
       console.error(error);
       complete = false;
@@ -11016,7 +11156,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       nodes.total.textContent = String(meta.total);
       nodes.progress.max = String(meta.total);
       setStatus("正在读取");
-      setFlow("pause", ["read"]);
+      setFlow("loop", ["read"]);
+      setCycle("read", [], "读取中，等待一轮结束");
     }
     if (payload.id !== activeId) {
       setStatus("不是同一轮内容");
@@ -11059,7 +11200,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   async function startLooking() {
     if (complete) resetSkein();
     setStatus("正在打开相机");
-    setFlow(activeId ? "mend" : "read", activeId ? ["read", "pause", "copy"] : []);
+    setFlow(activeId ? "loop" : "read", activeId ? ["read"] : []);
+    setCycle(activeId ? "repeat" : "read", activeId ? ["read", "pause", "copy"] : [], activeId ? "继续读取补洞轮次" : "对准源端画面");
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -11095,7 +11237,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.stop.disabled = true;
     if (!complete) {
       setStatus("已暂停");
-      setFlow(meta && stitches.size ? "copy" : "read", meta && stitches.size ? ["read", "pause"] : []);
+      setFlow(meta && stitches.size ? "loop" : "read", meta && stitches.size ? ["read"] : []);
+      setCycle(meta && stitches.size ? "copy" : "read", meta && stitches.size ? ["read", "pause"] : [], meta && stitches.size ? "复制短码并交给源端" : "先完成首轮读取");
     }
   }
 
@@ -11115,12 +11258,14 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   nodes.copyMending.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.mending.value);
     setStatus("编号已复制");
-    setFlow("mend", ["read", "pause", "copy"]);
+    setFlow("loop", ["read"]);
+    setCycle("repeat", ["read", "pause", "copy"], "把内容交给源端后继续读取");
   });
   nodes.copyMendingCode.addEventListener("click", async function () {
     await navigator.clipboard.writeText(nodes.mendingCode.value);
     setStatus("短码已复制");
-    setFlow("mend", ["read", "pause", "copy"]);
+    setFlow("loop", ["read"]);
+    setCycle("repeat", ["read", "pause", "copy"], "把短码交给源端后继续读取");
   });
   window.addEventListener("beforeunload", function (event) {
     if (!complete && activeId && stitches.size > 0) {
@@ -11129,6 +11274,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     }
   });
   setFlow("read", []);
+  setCycle("read", [], "先完成首轮读取");
 })();
 </script>
   </body>
