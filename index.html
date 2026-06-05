@@ -427,6 +427,10 @@ a.button {
   overflow-wrap: anywhere;
 }
 
+.readout-grid.tune strong {
+  font-size: 11px;
+}
+
 .cycle-head {
   display: flex;
   align-items: baseline;
@@ -827,6 +831,26 @@ textarea:focus {
                 <span>最近读到</span>
                 <strong id="lastStitch">尚未读到</strong>
               </div>
+            </div>
+          </div>
+
+          <div class="section-title">设备档位</div>
+          <div class="readout-grid tune">
+            <div>
+              <span>当前设备</span>
+              <strong id="deviceProfile">自动识别中</strong>
+            </div>
+            <div>
+              <span>后台线程</span>
+              <strong id="workerPlan">等待读取</strong>
+            </div>
+            <div>
+              <span>扫描节奏</span>
+              <strong id="scanPlan">等待读取</strong>
+            </div>
+            <div>
+              <span>源端建议</span>
+              <strong id="sourcePlan">等待读取</strong>
             </div>
           </div>
 
@@ -11132,9 +11156,10 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   var swatchWorkerUrl = "";
   var frameQueue = [];
   var lastCaptureAt = 0;
-  var captureEvery = 60;
-  var queueLimit = 96;
-  var captureLimit = 1280;
+  var scanProfile = resolveScanProfile();
+  var captureEvery = scanProfile.captureEvery;
+  var queueLimit = scanProfile.queueLimit;
+  var captureLimit = scanProfile.captureLimit;
 
   var nodes = {
     video: document.querySelector("#loomView"),
@@ -11161,7 +11186,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     cycleHint: document.querySelector("#cycleHint"),
     stateDetail: document.querySelector("#stateDetail"),
     scanInfo: document.querySelector("#scanInfo"),
-    lastStitch: document.querySelector("#lastStitch")
+    lastStitch: document.querySelector("#lastStitch"),
+    deviceProfile: document.querySelector("#deviceProfile"),
+    workerPlan: document.querySelector("#workerPlan"),
+    scanPlan: document.querySelector("#scanPlan"),
+    sourcePlan: document.querySelector("#sourcePlan")
   };
 
   var captureCanvas = document.createElement("canvas");
@@ -11187,6 +11216,73 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   function setLastStitch(message) {
     nodes.lastStitch.textContent = message;
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function resolveScanProfile() {
+    var ua = navigator.userAgent || "";
+    var platform = navigator.platform || "";
+    var touch = navigator.maxTouchPoints || 0;
+    var cores = navigator.hardwareConcurrency || 8;
+    var isIPhone = /iPhone|iPod/i.test(ua);
+    var isIPad = /iPad/i.test(ua) || (/Macintosh/i.test(ua) && touch > 1);
+    var isMac = !isIPad && (/Macintosh|Mac OS X/i.test(ua) || /Mac/i.test(platform));
+
+    if (isIPhone) {
+      return {
+        name: "iPhone 16 档",
+        workerCount: clamp(cores - 1, 2, 4),
+        captureEvery: 90,
+        queueLimit: 40,
+        captureLimit: 1080,
+        scanText: "90ms / 40 张 / 1080px",
+        sourceText: "300B / 1.0-1.2/s / 700px"
+      };
+    }
+
+    if (isIPad) {
+      return {
+        name: "iPad Air M2 档",
+        workerCount: clamp(cores - 1, 4, 8),
+        captureEvery: 70,
+        queueLimit: 64,
+        captureLimit: 1280,
+        scanText: "70ms / 64 张 / 1280px",
+        sourceText: "350B / 1.2-1.5/s / 760px"
+      };
+    }
+
+    if (isMac) {
+      return {
+        name: "MacBook 高性能档",
+        workerCount: clamp(cores - 2, 8, 16),
+        captureEvery: 50,
+        queueLimit: 128,
+        captureLimit: 1440,
+        scanText: "50ms / 128 张 / 1440px",
+        sourceText: "350-450B / 1.5-2.0/s / 820px"
+      };
+    }
+
+    return {
+      name: "通用均衡档",
+      workerCount: clamp(cores - 2, 3, 8),
+      captureEvery: 80,
+      queueLimit: 64,
+      captureLimit: 1280,
+      scanText: "80ms / 64 张 / 1280px",
+      sourceText: "300-350B / 1.0-1.5/s / 720px"
+    };
+  }
+
+  function updateProfileView() {
+    nodes.deviceProfile.textContent = scanProfile.name;
+    nodes.workerPlan.textContent = String(scanProfile.workerCount) + " 线程";
+    nodes.scanPlan.textContent = scanProfile.scanText;
+    nodes.sourcePlan.textContent = scanProfile.sourceText;
   }
 
   async function getNativeDetector() {
@@ -11456,8 +11552,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     try {
       var blob = new Blob([source + "\n(" + workerRuntime.toString() + ")();"], { type: "text/javascript" });
       swatchWorkerUrl = URL.createObjectURL(blob);
-      var cores = navigator.hardwareConcurrency || 8;
-      var count = cores >= 10 ? Math.max(6, Math.min(16, cores - 2)) : Math.max(2, Math.min(4, cores - 2));
+      var count = scanProfile.workerCount;
 
       function bindWorker(worker) {
         worker.busy = false;
@@ -11986,7 +12081,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       await nodes.video.play();
       nodes.start.disabled = true;
       nodes.stop.disabled = false;
-      setScanInfo(workerReady ? "相机已打开，正在后台读取画面" : "相机已打开，正在寻找画面", true);
+      setScanInfo(workerReady ? "相机已打开，正在后台读取画面（" + scanProfile.name + "）" : "相机已打开，正在寻找画面", true);
       setLastStitch("尚未读到");
       setStatus("正在读取");
       timer = window.requestAnimationFrame(keepLooking);
@@ -12069,6 +12164,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   }
   setFlow("read", []);
   setCycle("read", [], "等待首轮读取");
+  updateProfileView();
 })();
 </script>
   </body>
