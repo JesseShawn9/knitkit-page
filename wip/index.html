@@ -703,7 +703,7 @@ select {
 
 .task-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 76px 76px;
+  grid-template-columns: minmax(0, 1fr) 92px 92px;
   gap: 8px;
   align-items: center;
 }
@@ -978,10 +978,10 @@ textarea:focus {
             <div class="section-title">任务</div>
             <div class="task-row">
               <select id="taskSelect" aria-label="选择任务"></select>
-              <button id="loadTask" class="secondary" type="button">继续</button>
-              <button id="forgetTask" class="secondary" type="button">清除</button>
+              <button id="loadTask" class="secondary" type="button">继续任务</button>
+              <button id="forgetTask" class="secondary" type="button">删除任务</button>
             </div>
-            <div id="taskHint" class="meta">选择一个任务继续。</div>
+            <div id="taskHint" class="meta">选择历史任务继续读取，删除会移除本机保存的进度。</div>
           </div>
 
           <div class="section-title">仪表盘</div>
@@ -11330,6 +11330,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   var captureLimit = scanProfile.captureLimit;
   var dbPromise = null;
   var taskRefreshTimer = 0;
+  var saveChain = Promise.resolve();
+  var pendingSaves = 0;
 
   var nodes = {
     video: document.querySelector("#loomView"),
@@ -11548,24 +11550,26 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   async function saveTaskRecord() {
     var record = taskRecord();
-    if (!record) return;
+    if (!record) return false;
     var db = await openTaskDb();
-    if (!db) return;
+    if (!db) return false;
     var transaction = db.transaction("tasks", "readwrite");
     transaction.objectStore("tasks").put(record);
     await transactionDone(transaction);
     scheduleTaskListRefresh();
+    return true;
   }
 
   async function saveStitchRecord(index, value) {
-    if (!meta) return;
+    if (!meta) return false;
     var db = await openTaskDb();
-    if (!db) return;
+    if (!db) return false;
     var transaction = db.transaction(["tasks", "stitches"], "readwrite");
     transaction.objectStore("tasks").put(taskRecord());
     transaction.objectStore("stitches").put({ taskId: meta.id, index: index, value: value });
     await transactionDone(transaction);
     scheduleTaskListRefresh();
+    return true;
   }
 
   async function readTaskList() {
@@ -11602,7 +11606,26 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     var gathered = Number(task.gathered || 0);
     var total = Number(task.total || 0);
     var ratio = total ? Math.floor(gathered * 100 / total) : 0;
-    return kit.safeName(task.name) + " · #" + String(task.id).slice(0, 8) + " · " + gathered + "/" + total + " · " + ratio + "% · " + formatTaskTime(task.updatedAt);
+    return kit.safeName(task.name) + " · " + gathered + "/" + total + " · " + ratio + "% · " + formatTaskTime(task.updatedAt);
+  }
+
+  function queueTaskSave(work) {
+    pendingSaves += 1;
+    nodes.taskHint.textContent = "正在保存进度。";
+    saveChain = saveChain.catch(function () {
+      return null;
+    }).then(work).then(function (saved) {
+      pendingSaves -= 1;
+      if (pendingSaves <= 0) {
+        pendingSaves = 0;
+        nodes.taskHint.textContent = saved === false ? "当前浏览器没有开放历史任务保存。" : "进度已保存，之后可从历史任务继续。";
+      }
+    }).catch(function (error) {
+      pendingSaves -= 1;
+      console.warn(error);
+      nodes.taskHint.textContent = "进度保存失败，请保持页面打开。";
+    });
+    return saveChain;
   }
 
   async function refreshTaskPicker() {
@@ -11617,7 +11640,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     });
     nodes.loadTask.disabled = !tasks.length;
     nodes.forgetTask.disabled = !tasks.length;
-    nodes.taskHint.textContent = tasks.length ? "选择一个任务继续读取或清除。" : "没有保存的任务。";
+    nodes.taskHint.textContent = tasks.length ? "选择历史任务继续读取，删除会移除本机保存的进度。" : "没有保存的任务。";
   }
 
   function scheduleTaskListRefresh() {
@@ -11674,7 +11697,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     setScanInfo("已载入任务", true);
     setLastStitch(stitches.size ? "已恢复 " + String(stitches.size) + " 片" : "尚未读到");
     setStatus("任务已载入");
-    nodes.taskHint.textContent = "当前任务 #" + String(activeId).slice(0, 8) + "，可继续读取。";
+    nodes.taskHint.textContent = "已载入历史任务，可继续读取。";
     updateProgress();
     if (stitches.size >= meta.total) {
       await finish();
@@ -12314,8 +12337,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       setStatus("已完成");
       setFlow("done", ["read", "loop"]);
       setCycle("repeat", ["read", "pause", "copy"], "已收集完毕");
-      saveTaskRecord().catch(function (error) {
-        console.warn(error);
+      queueTaskSave(function () {
+        return saveTaskRecord();
       });
     } catch (error) {
       console.error(error);
@@ -12342,13 +12365,13 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         stitchSize: payload.c || 0
       };
       nodes.total.textContent = String(meta.total);
-      nodes.taskHint.textContent = "当前任务 #" + String(activeId).slice(0, 8) + "，正在保存进度。";
+      nodes.taskHint.textContent = "正在保存当前任务进度。";
       setScanInfo("已识别 KnitKit 内容", true);
       setStatus("正在读取");
       setFlow(repairMode ? "loop" : "read", repairMode ? ["read"] : []);
       setCycle("read", [], repairMode ? "补洞轮次读取中" : "首轮读取中");
-      saveTaskRecord().catch(function (error) {
-        console.warn(error);
+      queueTaskSave(function () {
+        return saveTaskRecord();
       });
     }
     if (payload.id !== activeId) {
@@ -12361,8 +12384,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       stitches.set(payload.i, payload.b);
       setLastStitch("第 " + String(payload.i + 1) + " 片");
       setScanInfo("已读入新片段", true);
-      saveStitchRecord(payload.i, payload.b).catch(function (error) {
-        console.warn(error);
+      queueTaskSave(function () {
+        return saveStitchRecord(payload.i, payload.b);
       });
     } else {
       setLastStitch("第 " + String(payload.i + 1) + " 片已读过");
@@ -12534,6 +12557,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     });
   });
   nodes.forgetTask.addEventListener("click", function () {
+    var option = nodes.taskSelect.options[nodes.taskSelect.selectedIndex];
+    var label = option ? option.textContent : "这个历史任务";
+    if (!window.confirm("确定删除历史任务？\n\n" + label + "\n\n删除后，本机保存的进度会被移除。")) return;
     deleteTask(nodes.taskSelect.value).catch(function (error) {
       console.warn(error);
       setStatus("任务清除失败");
@@ -12561,6 +12587,20 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     if (!complete && activeId && stitches.size > 0) {
       event.preventDefault();
       event.returnValue = "";
+    }
+  });
+  window.addEventListener("pagehide", function () {
+    if (activeId && stitches.size > 0) {
+      queueTaskSave(function () {
+        return saveTaskRecord();
+      });
+    }
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden" && activeId && stitches.size > 0) {
+      queueTaskSave(function () {
+        return saveTaskRecord();
+      });
     }
   });
   if (location.protocol === "file:" || location.hostname === "localhost" || location.hostname === "127.0.0.1") {
