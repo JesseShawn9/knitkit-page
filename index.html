@@ -459,6 +459,10 @@ a.button {
   overflow: hidden;
 }
 
+.dashboard-item.dashboard-wide {
+  grid-column: span 2;
+}
+
 .dashboard-item.with-stepper {
   padding: 8px;
 }
@@ -973,7 +977,7 @@ textarea:focus {
               <strong id="stitchTotal">0</strong>
             </div>
             <div class="dashboard-label">设备建议</div>
-            <div class="dashboard-item">
+            <div class="dashboard-item dashboard-wide">
               <span>当前设备</span>
               <strong id="deviceProfile">自动识别中</strong>
             </div>
@@ -981,11 +985,11 @@ textarea:focus {
               <span>后台线程</span>
               <strong id="workerPlan">等待读取</strong>
             </div>
-            <div class="dashboard-item">
+            <div class="dashboard-item dashboard-wide">
               <span>扫描节奏</span>
               <strong id="scanPlan">等待读取</strong>
             </div>
-            <div class="dashboard-item">
+            <div class="dashboard-item dashboard-wide">
               <span>源端建议</span>
               <strong id="sourcePlan">等待读取</strong>
             </div>
@@ -11434,6 +11438,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     nodes.workerPlan.textContent = String(scanProfile.workerCount) + " 线程";
     nodes.scanPlan.textContent = scanProfile.scanText;
     nodes.sourcePlan.textContent = scanProfile.sourceText;
+    nodes.deviceProfile.title = scanProfile.name;
+    nodes.scanPlan.title = scanProfile.scanText;
+    nodes.sourcePlan.title = scanProfile.sourceText;
   }
 
   async function getNativeDetector() {
