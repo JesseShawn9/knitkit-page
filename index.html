@@ -127,6 +127,45 @@ a.button {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
+.top-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lamp-dot {
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #6e6e73;
+  box-shadow:
+    0 0 0 4px rgba(255, 255, 255, 0.055),
+    0 0 16px rgba(255, 255, 255, 0.08);
+}
+
+.lamp-dot[data-tone="busy"] {
+  background: var(--blue);
+  box-shadow:
+    0 0 0 4px rgba(41, 151, 255, 0.13),
+    0 0 16px rgba(41, 151, 255, 0.45);
+}
+
+.lamp-dot[data-tone="ok"] {
+  background: var(--green);
+  box-shadow:
+    0 0 0 4px rgba(48, 209, 88, 0.13),
+    0 0 16px rgba(48, 209, 88, 0.48);
+}
+
+.lamp-dot[data-tone="warn"] {
+  background: #ffd60a;
+  box-shadow:
+    0 0 0 4px rgba(255, 214, 10, 0.13),
+    0 0 16px rgba(255, 214, 10, 0.45);
+}
+
 .workspace {
   position: relative;
   width: min(1700px, calc(100vw - 40px));
