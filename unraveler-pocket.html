@@ -962,6 +962,16 @@ textarea:focus {
 
       <section class="workspace">
         <aside class="panel">
+          <div id="taskPanel" class="task-panel" hidden>
+            <div class="section-title">扫描任务</div>
+            <div class="task-row">
+              <select id="taskSelect" aria-label="选择历史扫描任务"></select>
+              <button id="loadTask" class="secondary" type="button">继续任务</button>
+              <button id="forgetTask" class="secondary" type="button">清空任务</button>
+            </div>
+            <div id="taskHint" class="meta">选择历史任务继续读取，清空会移除本机保存的进度。</div>
+          </div>
+
           <div class="section-title">状态</div>
           <ol id="flow" class="flow" aria-label="接收端流程">
             <li data-step="read" class="active"><span>1</span><strong>首轮读取</strong><em>点击读取，对准右侧框</em></li>
@@ -972,16 +982,6 @@ textarea:focus {
           <div id="cycle" class="status-note" aria-label="当前互动">
             <strong id="cycleHint">等待首轮读取</strong>
             <span id="stateDetail">点击下方读取按钮，然后让右侧取景框覆盖源端画面。读取开始后，暂停按钮会变亮。</span>
-          </div>
-
-          <div id="taskPanel" class="task-panel" hidden>
-            <div class="section-title">任务</div>
-            <div class="task-row">
-              <select id="taskSelect" aria-label="选择任务"></select>
-              <button id="loadTask" class="secondary" type="button">继续任务</button>
-              <button id="forgetTask" class="secondary" type="button">删除任务</button>
-            </div>
-            <div id="taskHint" class="meta">选择历史任务继续读取，删除会移除本机保存的进度。</div>
           </div>
 
           <div class="section-title">仪表盘</div>
@@ -11630,7 +11630,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
   async function refreshTaskPicker() {
     var tasks = await readTaskList();
-    nodes.taskPanel.hidden = !tasks.length;
+    nodes.taskPanel.hidden = !!activeId || !tasks.length;
     nodes.taskSelect.innerHTML = "";
     tasks.forEach(function (task) {
       var option = document.createElement("option");
@@ -11640,7 +11640,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     });
     nodes.loadTask.disabled = !tasks.length;
     nodes.forgetTask.disabled = !tasks.length;
-    nodes.taskHint.textContent = tasks.length ? "选择历史任务继续读取，删除会移除本机保存的进度。" : "没有保存的任务。";
+    nodes.taskHint.textContent = tasks.length ? "选择历史任务继续读取，清空会移除本机保存的进度。" : "没有保存的任务。";
   }
 
   function scheduleTaskListRefresh() {
@@ -11698,6 +11698,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     setLastStitch(stitches.size ? "已恢复 " + String(stitches.size) + " 片" : "尚未读到");
     setStatus("任务已载入");
     nodes.taskHint.textContent = "已载入历史任务，可继续读取。";
+    nodes.taskPanel.hidden = true;
     updateProgress();
     if (stitches.size >= meta.total) {
       await finish();
@@ -12559,7 +12560,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   nodes.forgetTask.addEventListener("click", function () {
     var option = nodes.taskSelect.options[nodes.taskSelect.selectedIndex];
     var label = option ? option.textContent : "这个历史任务";
-    if (!window.confirm("确定删除历史任务？\n\n" + label + "\n\n删除后，本机保存的进度会被移除。")) return;
+    if (!window.confirm("确定清空历史任务？\n\n" + label + "\n\n清空后，本机保存的进度会被移除。")) return;
     deleteTask(nodes.taskSelect.value).catch(function (error) {
       console.warn(error);
       setStatus("任务清除失败");
