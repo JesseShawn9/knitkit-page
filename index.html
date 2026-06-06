@@ -297,6 +297,10 @@ a.button {
   gap: 8px;
 }
 
+.runtime-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .control-grid {
   grid-template-columns: 1fr;
 }
@@ -959,6 +963,10 @@ textarea:focus {
 
   .control-grid,
   .repair-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-grid {
     grid-template-columns: 1fr;
   }
 
