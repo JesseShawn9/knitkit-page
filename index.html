@@ -972,7 +972,7 @@ textarea:focus {
               <span>总片段</span>
               <strong id="stitchTotal">0</strong>
             </div>
-            <div class="dashboard-label">设备档位</div>
+            <div class="dashboard-label">设备建议</div>
             <div class="dashboard-item">
               <span>当前设备</span>
               <strong id="deviceProfile">自动识别中</strong>
@@ -11357,59 +11357,75 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     return Math.max(min, Math.min(max, value));
   }
 
+  function formatDeviceName(kind, os, cores, memory) {
+    var parts = [kind];
+    if (os) parts.push(os);
+    if (cores) parts.push(String(cores) + " 线程");
+    if (memory) parts.push(String(memory) + "GB");
+    return parts.join(" / ");
+  }
+
+  function resolveSourceText(chunkSize, rhythmMin, rhythmMax, swatchSize) {
+    if (rhythmMin === rhythmMax) return String(chunkSize) + "B / " + rhythmMin.toFixed(1) + "/s / " + String(swatchSize) + "px";
+    return String(chunkSize) + "B / " + rhythmMin.toFixed(1) + "-" + rhythmMax.toFixed(1) + "/s / " + String(swatchSize) + "px";
+  }
+
   function resolveScanProfile() {
     var ua = navigator.userAgent || "";
     var platform = navigator.platform || "";
     var touch = navigator.maxTouchPoints || 0;
     var cores = navigator.hardwareConcurrency || 8;
+    var memory = navigator.deviceMemory || 0;
     var isIPhone = /iPhone|iPod/i.test(ua);
     var isIPad = /iPad/i.test(ua) || (/Macintosh/i.test(ua) && touch > 1);
     var isMac = !isIPad && (/Macintosh|Mac OS X/i.test(ua) || /Mac/i.test(platform));
+    var isAndroid = /Android/i.test(ua);
+    var isWindows = /Windows/i.test(ua);
+    var isLinux = !isAndroid && /Linux/i.test(ua);
+    var isMobile = isIPhone || (isAndroid && /Mobile/i.test(ua));
+    var isTablet = isIPad || (isAndroid && !/Mobile/i.test(ua));
+    var isDesktop = isMac || isWindows || isLinux;
+    var workerMax = isMobile ? 4 : isTablet ? 8 : 16;
+    var workerMin = isMobile ? 2 : isTablet ? 4 : 4;
+    var workerCount = clamp(cores - (isMobile ? 1 : 2), workerMin, workerMax);
+    var captureEvery = isMobile ? 90 : isTablet ? 70 : isDesktop ? 50 : 80;
+    var queueLimit = isMobile ? 40 : isTablet ? 64 : isDesktop ? 128 : 64;
+    var captureLimit = isMobile ? 1080 : isTablet ? 1280 : isDesktop ? 1440 : 1280;
+    var chunkSize = isMobile ? 300 : isTablet ? 350 : cores >= 12 ? 450 : 350;
+    var rhythmMin = isMobile ? 1.0 : isTablet ? 1.2 : cores >= 12 ? 1.5 : 1.2;
+    var rhythmMax = isMobile ? 1.2 : isTablet ? 1.5 : cores >= 12 ? 2.0 : 1.6;
+    var swatchSize = isMobile ? 700 : isTablet ? 760 : cores >= 12 ? 820 : 760;
+    var os = "";
+    var kind = "通用设备";
 
     if (isIPhone) {
-      return {
-        name: "iPhone 16 档",
-        workerCount: clamp(cores - 1, 2, 4),
-        captureEvery: 90,
-        queueLimit: 40,
-        captureLimit: 1080,
-        scanText: "90ms / 40 张 / 1080px",
-        sourceText: "300B / 1.0-1.2/s / 700px"
-      };
-    }
-
-    if (isIPad) {
-      return {
-        name: "iPad Air M2 档",
-        workerCount: clamp(cores - 1, 4, 8),
-        captureEvery: 70,
-        queueLimit: 64,
-        captureLimit: 1280,
-        scanText: "70ms / 64 张 / 1280px",
-        sourceText: "350B / 1.2-1.5/s / 760px"
-      };
-    }
-
-    if (isMac) {
-      return {
-        name: "MacBook 高性能档",
-        workerCount: clamp(cores - 2, 8, 16),
-        captureEvery: 50,
-        queueLimit: 128,
-        captureLimit: 1440,
-        scanText: "50ms / 128 张 / 1440px",
-        sourceText: "350-450B / 1.5-2.0/s / 820px"
-      };
+      kind = "iPhone";
+      os = "iOS";
+    } else if (isIPad) {
+      kind = "iPad";
+      os = "iPadOS";
+    } else if (isAndroid) {
+      kind = isTablet ? "Android 平板" : "Android 手机";
+      os = "Android";
+    } else if (isMac) {
+      kind = "Mac";
+      os = "macOS";
+    } else if (isWindows) {
+      kind = "Windows 电脑";
+      os = "Windows";
+    } else if (isLinux) {
+      kind = "Linux 电脑";
+      os = "Linux";
     }
 
     return {
-      name: "通用均衡档",
-      workerCount: clamp(cores - 2, 3, 8),
-      captureEvery: 80,
-      queueLimit: 64,
-      captureLimit: 1280,
-      scanText: "80ms / 64 张 / 1280px",
-      sourceText: "300-350B / 1.0-1.5/s / 720px"
+      name: formatDeviceName(kind, os, cores, memory),
+      workerCount: workerCount,
+      captureEvery: captureEvery,
+      queueLimit: queueLimit,
+      captureLimit: captureLimit,
+      scanText: String(captureEvery) + "ms / " + String(queueLimit) + " 张 / " + String(captureLimit) + "px",
+      sourceText: resolveSourceText(chunkSize, rhythmMin, rhythmMax, swatchSize)
     };
   }
 
@@ -12211,7 +12227,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       await nodes.video.play();
       nodes.start.disabled = true;
       nodes.stop.disabled = false;
-      setScanInfo(workerReady ? "相机已打开，正在后台读取画面（" + scanProfile.name + "）" : "相机已打开，正在寻找画面", true);
+      setScanInfo(workerReady ? "相机已打开，后台读取中" : "相机已打开，正在寻找画面", true);
       setLastStitch("尚未读到");
       setStatus("正在读取");
       timer = window.requestAnimationFrame(keepLooking);
