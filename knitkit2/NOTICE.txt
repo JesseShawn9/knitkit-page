@@ -1,5 +1,6 @@
 KnitKit2 uses libcimbar v0.6.8 (MPL-2.0).
 The original 2026-08-21 browser receiver, worker and Zstandard scripts are vendored unchanged.
+The bundled receiver capture adapter awaits VideoFrame.copyTo, uses visible pixel dimensions, and releases failed capture slots with an error callback.
 Packaging replaces the worker import with the same inline runtime; WASM bytes and memory limits are unchanged.
 The shell intercepts validated complete files for local batch storage and assembly, and controls start/pause and presentation.
 Upstream: https://github.com/sz3/libcimbar/tree/v0.6.8 and https://cimbar.org/recv.html
