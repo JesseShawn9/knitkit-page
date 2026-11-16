@@ -232,12 +232,18 @@ details a { color: var(--accent); }
     return 'KK2M:' + m.id + ':' + ranges(m.hashes.map((_, i) => i).filter(i => !have.has(i)));
   }
   function replay(m, code) {
-    const match = /^KK2M:([0-9a-f]{64}):(.+)$/.exec(code.trim());
-    if (!match || match[1] !== m.id) throw new Error('短码不属于当前文件任务，请复制当前任务的待收短码。');
+    let body = code.trim();
+    if (body.startsWith('KK2M:')) {
+      const match = /^KK2M:([0-9a-f]{64}):(.+)$/.exec(body);
+      if (!match || match[1] !== m.id) throw new Error('短码不属于当前文件任务，请复制当前任务的待收短码。');
+      body = match[2];
+    }
+    if (!body || body.length > maxHeader) throw new Error('请输入有效的待收序号或短码。');
+    body = body.replace(/\s*-\s*/g, '-').replace(/\s*[,，、;；]\s*/g, ',').replace(/\s+/g, ',');
     const result = new Set();
-    for (const group of match[2].split(',')) {
+    for (const group of body.split(',')) {
       const range = /^(\d+)(?:-(\d+))?$/.exec(group);
-      if (!range) throw new Error('待收短码格式不正确。');
+      if (!range) throw new Error('待收内容格式不正确，请输入序号、范围或完整短码。');
       const from = Number(range[1]), to = Number(range[2] || range[1]);
       if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 1 || to < from || to > m.hashes.length) throw new Error('待收序号超出当前任务范围。');
       for (let i = from; i <= to; i++) result.add(i - 1);
