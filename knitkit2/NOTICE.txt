@@ -1,3 +1,4 @@
-KnitKit2 uses unmodified libcimbar v0.6.8 (MPL-2.0).
+KnitKit2 uses libcimbar v0.6.8 (MPL-2.0).
+The reader build changes only the WASM memory limits from 128MiB to 512MiB; codec instructions and vendor snapshots are unchanged.
 Upstream source: https://github.com/sz3/libcimbar/tree/v0.6.8
-Extension source is included in the release source archive.
+Extension and build source are included in the release source archive.
