@@ -1,4 +1,5 @@
 KnitKit2 uses libcimbar v0.6.8 (MPL-2.0).
-The reader build changes only the WASM memory limits from 128MiB to 512MiB; codec instructions and vendor snapshots are unchanged.
+Image-reader builds change only the WASM memory limits from 128MiB to 512MiB; the fountain-only collector retains 128MiB. Codec instructions and vendor snapshots are unchanged.
 Upstream source: https://github.com/sz3/libcimbar/tree/v0.6.8
+fzstd 0.1.1 (MIT) reads partial Zstandard prefixes. Source: https://github.com/101arrowz/fzstd ; notice: fzstd-LICENSE.
 Extension and build source are included in the release source archive.
