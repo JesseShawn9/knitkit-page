@@ -1,0 +1,3 @@
+KnitKit2 uses unmodified libcimbar v0.6.8 (MPL-2.0).
+Upstream source: https://github.com/sz3/libcimbar/tree/v0.6.8
+Extension source is included in the release source archive.

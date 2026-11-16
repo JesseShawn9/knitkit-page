@@ -1,13 +1,87 @@
-# KnitKit2 Unraveler
+# KnitKit2 分批扩展
 
-Standalone receiving page for the KnitKit2 Cimbar batch extension.
+独立于第一期 KnitKit。保留 libcimbar v0.6.8 的编解码内核，在外层增加离线分段、编号选择、接收清单、本地暂存和自动合并。不改变官方内核的33MB单流容量，而是让每个任务由多份容量受控的独立分段组成。
 
-- Open: https://jesseshawn9.github.io/knitkit-page/knitkit2/
-- Use the matching offline batch sender, not the legacy QR sender or the unmodified Cimbar sender.
-- The page includes its JS, WASM and Worker code. No file or camera data is uploaded.
-- Completed batches are saved in the browser. An unfinished batch may need to be read again after refresh.
-- Source, tests and third-party license material: [source.zip](source.zip).
-- The decoder uses unmodified libcimbar v0.6.8, under MPL-2.0. Corresponding upstream source: https://github.com/sz3/libcimbar/tree/v0.6.8 .
-- Existing root and Pocket pages are unchanged.
+## 使用
 
-Automated protocol, real image-codec and synthetic-camera tests passed. Actual iPhone camera speed and long-running stability remain device-test items.
+### 源端
+
+打开 `dist/knitkit2.html`，使用 Chrome 直接双击、file:// 离线运行。不需要 Node、Python、localhost 或旁边的源码文件。
+
+1. 选择任意文件，默认每段1MiB，可在首次播放前改成2、5、10或20MiB。
+2. 页面逐段计算校验值，自动准备第一段。整个文件不一次载入JS内存。
+3. 先在接收端点击“读取”，再在源端点击“开始首轮”。默认每段停留60秒，自动切段，播完一轮后暂停。
+4. 在接收端暂停，复制“待收短码”，粘贴到源端并点击“载入待收段”。重新读取，再开始补收轮；重复到收齐。
+5. 播放节奏、每段停留时长可随时调整。首次播放后锁定每段容量和画面密度；重新选择文件才重新规划任务。手动点击编号会暂停并定位到该段，继续后从该位置播本轮剩余段。
+
+源端无法知道接收端是否完成，自动切段按时长，不是完成确认。默认1MiB/60秒不是速度或成功率承诺；当前段进度不足时可延长停留到120、300、600秒，避免每轮都不够收齐。切段会丢弃上一未完成段的内存解码状态，已完成段不丢。编号可以反复选择，不需要重新导入文件。
+
+画面密度默认低（原生Bu，752×656），优先减少手机光学采样压力；也可选中（Bm，1040×736）或高（B，1040×1040）。接收端在首次定位时自动识别三种模式，兼容旧版高密度源端。1MiB是1048576字节。
+
+快速闪烁可能诱发光敏性癫痫或造成不适。不要长时间盯视图案。
+
+### 接收端
+
+`dist/knitkit2-reader.html` 同样包含全部JS、WASM和Worker代码，是独立HTML。与原版不同，不必部署旁边的JS/WASM文件。
+
+1. 将此页放到可信HTTPS站点，Mac/iPhone浏览器打开后点击“读取”，允许摄像头。
+2. 取景区上方直接显示原生喷泉解码进度条；下方显示已保存分段总进度。首段完整读到并校验后，显示文件名、分段总数和所有待收编号。
+3. 已完成段显示绿色，待收短码随完成状态更新。首轮结束后暂停，复制短码给源端只播缺段，不要求按顺序。
+4. 收齐后自动逐段复核SHA-256、按序组成Blob，并核对总大小。点击“保存原文件”。
+
+已发布独立HTTPS接收地址：https://jesseshawn9.github.io/knitkit-page/knitkit2/ 。iPhone用Safari打开，点击“读取”并允许摄像头即可。旧首页和Pocket页面均未覆盖。
+
+Mac本机仍可运行 `node cimbar/serve.js` 进行localhost验证；这不是源端使用要求。iPhone不能把普通HTTP IP或“文件”应用中的HTML当作可信HTTPS站点使用。
+
+初次独立发布：Pages提交 `48d878a22f6722e8edafbe688b57acdc920d6ce2`，部署运行 `43801398036` 成功。对应源码包位于该HTTPS目录下的 `source.zip`。后续发布以构建产物、线上字节校验及部署结果为准，不能把启动正常视为真实iPhone镜头或速度验收。
+
+接收取帧优先用视频帧回调，并有定时回退，不再依赖video.currentTime。请求后置高分辨率相机，实际尺寸由设备决定；预览是中央正方形裁切，送入解码器的是同一区域，最长1920像素。不会把竖屏全画面和大量上下背景缩成窄条。界面显示已取画面和有效画面，长时间未识别会给出定位提示，Worker超时会停止并报错。
+
+本页只支持本扩展封装的Cimbar分段，不支持旧KnitKit二维码或未经封装的官方Cimbar文件。两个旧页面均保持不变。
+
+## 暂存与恢复
+
+- 每个完成段经过校验后才写入IndexedDB；完成状态以事务成功为准。
+- 刷新或关闭浏览器后，正常浏览模式下可在原网址、同一浏览器中选择历史任务继续。
+- 仅保存完整段。未完成段的喷泉解码状态不落盘，刷新、切换到另一段或读取引擎重建时需要重扫该段。
+- 暂停不清空当前解码器；同页继续读取时可沿用未完成段的解码状态。
+- 不同浏览器、无痕模式、修改域名/协议/端口、清除网站数据、系统清理浏览器存储，均可能导致无法访问之前的任务。不要把浏览器存储当永久备份。
+- 本地空间不足或保存失败会停止并报错，不会将未保存段标为完成。
+- “删除此任务”需要确认，只删除当前任务及其完成段。
+
+## 数据与安全边界
+
+- 每段携带完整清单：原名、MIME、原大小、每段容量、所有分段SHA-256和任务ID。
+- 任务ID是固定字段清单的SHA-256。同文件、同名字/MIME、同每段容量可重建同一任务；改名或更改容量会产生不同任务。
+- 接收端拒绝其他任务混入，重复段不重复累计，损坏的分段不保存。
+- 最终校验是逐段SHA-256加顺序、总大小检查；任务ID不是原文件整体SHA-256。测试会额外对原文件及合并文件计算完整SHA-256验证一致。
+- 仅当前段和若干画面需要工作内存；最终下载仍受浏览器Blob、磁盘配额及设备资源限制，不保证任意大文件都能保存。
+- 单段限20MiB，清单头限2MiB，防止异常输入占用无界内存。
+- 不请求外部资源、不上传文件、不记录帧或内容。操作页面不显示许可展开区；许可、来源和源码获取信息独立保留在随包的LICENSE、NOTICE.txt、README及源码包中，未改动上游编译文件。
+- 读取在独立Worker中执行，捕获队列有界，一次只处理一帧，防止无限缓存相机画面。
+
+## 构建与验证
+
+无新增npm依赖，构建工具只用于开发，不需要带到源端。
+
+```sh
+node cimbar/build.js
+node cimbar/test/protocol.test.cjs
+node cimbar/test/browser.test.cjs
+node cimbar/test/large-optical.test.cjs
+```
+
+浏览器测试默认复用本机已安装的Playwright。其他机器可通过 `PLAYWRIGHT_MODULE` 指向已安装模块。截图和报告默认写入 `/private/tmp/knitkit2-browser-check`，可用 `KNIT_TEST_OUTPUT` 改位置。
+
+验证分层：
+
+- 协议测试：二进制、中文文件名、空文件、确定性、乱序、重复、缺段、篡改；165MiB拆17段后合并，完整SHA-256一致。
+- 浏览器测试：断网file://源端，真实WASM生成彩色图案，再由真实WASM从图像解码；接收端乱序/重复/混入其他任务、刷新/重新打开页面/退出并重启浏览器进程恢复、自动合并后的下载字节校验、桌面/窄屏排版。
+- 大段图像测试：10MiB不可压缩随机二进制，真实WASM图案编解码，加入重复与跳过符号，最终SHA-256一致；这不是实际摄像头吞吐率测试。
+- 合成相机测试：浏览器生成的视频轨道验证取帧、Worker处理、切段、暂停及轨道释放。合成相机不代表真实镜头、反光、透视、曝光或iOS系统行为已验证。
+- 竖屏测试：1344×2240合成视频、冻结currentTime，验证视频帧回调及定时回退两条路径、自动Bu识别、中央方形裁切、原生中间进度、下载SHA-256一致；不能替代Safari/iPhone真机验收。
+- 尚需真机验证：UOS源端，Mac摄像头，iPhone Safari，长期任务稳定性及真实吞吐率。没有据此承诺106KB/s。
+
+## 上游
+
+使用未经修改的官方v0.6.8 JS/WASM发布资源。许可证和源码位置见 `vendor/README.md` 与 `vendor/LICENSE`。保留版权/许可信息，主界面使用KnitKit2品牌，不声称第三方内核为自研。
