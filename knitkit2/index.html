@@ -75,7 +75,13 @@ iframe { display: block; width: 100%; height: 100%; border: 0; }
 .reader.native-active { overflow: hidden; }
 .reader #nativeView { display: none; }
 .reader.native-active #nativeView { display: block; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 100; background: var(--camera); }
-.reader.native-active #pause { position: fixed; top: max(16px, env(safe-area-inset-top)); right: 16px; z-index: 101; width: 76px; flex: none; }
+.scan-dock { position: fixed; top: max(12px, env(safe-area-inset-top)); right: 12px; z-index: 101; width: min(310px, calc(100% - 80px)); padding: 10px 12px; background: var(--rail); border: 1px solid var(--line); border-radius: 4px; }
+.scan-dock-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.scan-dock-actions strong { margin-right: auto; font-size: 12px; white-space: nowrap; }
+.scan-dock-actions button { padding: 6px 10px; white-space: nowrap; font-size: 12px; }
+.live-missing { margin-top: 6px; max-height: 4em; overflow-y: auto; overflow-wrap: anywhere; font-size: 12px; }
+.live-notice { margin-top: 4px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.live-notice[data-error=true] { color: var(--error); }
 .reticle { position: absolute; height: 82%; max-width: 90%; aspect-ratio: var(--pattern-ratio, 1); left: 50%; top: 9%; transform: translateX(-50%); border: 1px solid var(--guide); pointer-events: none; }
 .empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--muted); font-size: 13px; background: var(--camera); }
 .scan-controls, .scan-summary { flex: none; min-width: 0; }
@@ -145,6 +151,7 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
 <body class="reader">
 <header><div class="brand"><strong>KnitKit2</strong><span>Unraveler</span></div><span id="badge" class="badge">待读取</span></header>
 <iframe id="nativeView" title="原版Cimbar接收页" allow="camera" referrerpolicy="no-referrer"></iframe>
+<section id="scanDock" class="scan-dock" aria-label="连续接收状态" hidden><div class="scan-dock-actions"><strong id="liveSaved">等待首段</strong><button id="liveCopy" disabled>复制待补</button><button id="livePause">暂停</button></div><p id="liveMissing" class="live-missing">待补：首段收齐后显示</p><textarea id="liveCode" rows="2" readonly aria-label="待补短码" hidden></textarea><p id="liveNotice" class="live-notice" role="status" aria-live="polite"></p></section>
 <main class="layout">
   <aside class="sidebar">
     <section id="tasks" hidden><h2>继续任务</h2><div id="taskList" class="task-list"></div></section>
@@ -234,7 +241,8 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
     if (!Number.isSafeInteger(h.index) || h.index < 0 || h.index >= m.hashes.length) throw new Error('分段序号超出清单范围。');
     const data = blob.slice(12 + length);
     if (data.size !== partLength(m, h.index) || await hash(await data.arrayBuffer()) !== m.hashes[h.index]) {
-      throw new Error('分段内容校验失败，请重扫这一段。');
+      const error = new Error('第' + (h.index + 1) + '段内容校验失败，已保留为待补。');
+      error.partIndex = h.index; error.taskId = m.id; throw error;
     }
     return { manifest: m, index: h.index, data };
   }
@@ -247,7 +255,8 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
     for (let i = 0; i < m.hashes.length; i++) {
       const blob = await getPart(i);
       if (!blob || blob.size !== partLength(m, i) || await hash(await blob.arrayBuffer()) !== m.hashes[i]) {
-        throw new Error('第' + (i + 1) + '段缺失或损坏，请重新读取。');
+        const error = new Error('第' + (i + 1) + '段缺失或损坏，已保留为待补。');
+        error.partIndex = i; throw error;
       }
       blobs.push(blob);
       progress(i + 1, m.hashes.length);
@@ -373,6 +382,9 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
         return () => request.result && request.result.data;
       });
     },
+    async dropPart(id, index) {
+      return transact(['parts'], 'readwrite', tx => tx.objectStore('parts').delete([id, index]));
+    },
     async remove(id) {
       for (const s of await this.skeins()) if (s.task === id) await this.dropSkein(s.key);
       return transact(['tasks', 'parts'], 'readwrite', tx => {
@@ -392,12 +404,14 @@ let engineReady = false, engineRequested = false, outputURL = null, serial = Pro
 let nativeEpoch = 0;
 function status(title, hint, error = false) {
   $('stateTitle').textContent = title; $('stateHint').textContent = hint; $('status').dataset.error = error;
+  $('liveNotice').textContent = title; $('liveNotice').dataset.error = error;
 }
 function controls() {
   const done = manifest && have.size === manifest.hashes.length;
-  $('read').disabled = reading || starting || merging || pending > 0 || done;
+  $('read').disabled = reading || starting || merging || pending > 0 || (done && !!outputURL);
   $('pause').disabled = !reading && !starting;
-  $('copy').disabled = !manifest || done || reading || starting || merging || pending > 0;
+  $('copy').disabled = $('liveCopy').disabled = !manifest || done || merging || pending > 0;
+  $('livePause').disabled = !reading && !starting;
   $('clear').disabled = $('other').disabled = !manifest || reading || starting || merging || pending > 0;
   for (const button of $('taskList').children) button.disabled = reading || starting || merging || pending > 0;
 }
@@ -410,6 +424,8 @@ function render() {
   $('mendingArea').hidden = !manifest || have.size === total;
   $('mending').value = manifest && have.size < total ? B.mending(manifest, have) : '';
   $('missingText').textContent = manifest ? '待收：' + (B.ranges(manifest.hashes.map((_, i) => i).filter(i => !have.has(i))) || '已全部收齐') : '';
+  $('liveSaved').textContent = manifest ? '已存 ' + have.size + ' / ' + total : '等待首段';
+  $('liveMissing').textContent = manifest ? '待补：' + (B.ranges(manifest.hashes.map((_, i) => i).filter(i => !have.has(i))) || '无') : '待补：首段收齐后显示';
   $('totalProgress').value = total ? have.size / total : 0;
   $('totalPercent').textContent = total ? Math.floor(have.size / total * 100) + '%' : '0%';
   $('totalLabel').textContent = manifest ? '已保存 ' + have.size + ' / ' + total + ' 段' : '总进度';
@@ -454,13 +470,23 @@ function command(kind) { $('nativeView').contentWindow.postMessage({ knitShell: 
 function pause() {
   reading = starting = false; clearTimeout(readTimer); command('pause');
   resetEngine(); document.body.classList.remove('native-active');
+  $('scanDock').hidden = true;
   if (lamp) { lamp.release().catch(() => {}); lamp = null; }
   $('badge').textContent = '已暂停'; $('empty').hidden = false; $('empty').textContent = '已暂停'; controls();
 }
 function resetEngine() {
   nativeEpoch++; engineReady = engineRequested = false; $('nativeView').srcdoc = '';
 }
-function fail(error) { pause(); if (!engineReady) resetEngine(); status('需要处理后继续', error.message || String(error), true); }
+function fail(error) { pause(); status('需要处理后继续', error.message || String(error), true); }
+function markReading() {
+  if (!starting && !reading) return false;
+  clearTimeout(readTimer);
+  if (reading) return true;
+  starting = false; reading = engineReady = true; $('empty').hidden = true; $('badge').textContent = '读取中';
+  status('正在识别图案', '完整段会自动保存，接着读取下一段。'); controls();
+  if (navigator.wakeLock) navigator.wakeLock.request('screen').then(lock => { if (reading) lamp = lock; else lock.release().catch(() => {}); }).catch(() => {});
+  return true;
+}
 async function start() {
   if (reading || starting || merging || pending) return;
   resetEngine();
@@ -470,22 +496,33 @@ async function start() {
   engineRequested = true;
   window.KnitNativeSources = { runtime: decode('nativeRuntime'), worker: decode('readerSource'), session: nativeEpoch };
   document.body.classList.add('native-active');
+  $('scanDock').hidden = false;
   $('nativeView').srcdoc = decode('nativeEngine');
-  readTimer = setTimeout(() => { if (starting) fail(new Error('摄像头尚未就绪，请检查权限后重试。')); }, 30000);
+  readTimer = setTimeout(() => { if (starting) status('等待原版相机就绪', '若权限提示已处理，请继续等待；相机不会因计时自动关闭。'); }, 30000);
 }
 async function merge() {
   if (merging || !manifest || have.size !== manifest.hashes.length) return;
-  pause(); merging = true; controls(); revokeOutput();
+  merging = true; controls(); revokeOutput();
   try {
     const blob = await B.assemble(manifest, i => KnitStore.part(manifest.id, i), (done, total) => status('正在合并原文件', '校验 ' + done + ' / ' + total + ' 段，请勿关闭页面。'));
+    pause();
     outputURL = URL.createObjectURL(blob); $('save').href = outputURL; $('save').download = B.safeName(manifest.name);
     $('saveArea').hidden = false; $('badge').textContent = '全部完成';
     $('partialProgress').value = 1; $('partial').textContent = '100%'; $('scanState').textContent = '全部分段已收齐'; $('extraProgress').replaceChildren();
     status('已收齐，保存原文件', '全部分段的内容、顺序和大小已校验通过。');
+  } catch (error) {
+    if (!Number.isSafeInteger(error.partIndex) || error.partIndex < 0 || error.partIndex >= manifest.hashes.length) throw error;
+    have.delete(error.partIndex); render(); await KnitStore.dropPart(manifest.id, error.partIndex);
+    status('需要补收第' + (error.partIndex + 1) + '段', reading ? '其余已保存段保留，相机继续读取。' : '其余已保存段保留，可复制待补短码后继续读取。', true);
   } finally { merging = false; controls(); }
 }
 async function accept(blob) {
-  const value = await B.unpack(blob);
+  let value;
+  try { value = await B.unpack(blob); }
+  catch (error) {
+    const title = manifest && error.taskId === manifest.id && Number.isSafeInteger(error.partIndex) ? '第' + (error.partIndex + 1) + '段未通过校验' : '这一段未通过校验';
+    status(title, '未计入完成，其他进度不变。继续读取，稍后补收。' + error.message, true); return false;
+  }
   if (manifest && manifest.id !== value.manifest.id) {
     status('不是当前任务', '当前任务没有改变。请播放当前文件的待收段，或暂停后切换任务。', true); return false;
   }
@@ -499,12 +536,10 @@ window.addEventListener('message', event => {
   if (event.source !== $('nativeView').contentWindow || event.origin !== location.origin || !event.data || !event.data.knitNative || event.data.session !== nativeEpoch) return;
   const data = event.data;
   if (data.kind === 'camera') {
-    clearTimeout(readTimer); if (!starting && !reading) { command('pause'); return; }
-    starting = false; reading = engineReady = true; $('empty').hidden = true; $('badge').textContent = '读取中';
-    status('正在识别图案', '每段收齐后自动保存；播完一轮，再复制待收短码。'); controls();
-    if (navigator.wakeLock) navigator.wakeLock.request('screen').then(lock => { if (reading) lamp = lock; else lock.release().catch(() => {}); }).catch(() => {});
+    if (!markReading()) { command('pause'); return; }
   }
   if (data.kind === 'progress' && Array.isArray(data.report) && (!manifest || have.size < manifest.hashes.length)) {
+    markReading();
     const list = data.report.map(Number).filter(Number.isFinite).map(v => Math.max(0, Math.min(1, v)));
     $('partialProgress').value = list[0] || 0; $('partial').textContent = Math.floor((list[0] || 0) * 100) + '%';
     $('scanState').textContent = list.length > 1 ? '识别进度（' + list.length + '组）' : list.length ? '本段识别进度' : '等待下一段';
@@ -512,16 +547,26 @@ window.addEventListener('message', event => {
     for (const value of list.slice(1)) { const progress = document.createElement('progress'); progress.max = 1; progress.value = value; progress.setAttribute('aria-label', '其他原版识别进度'); $('extraProgress').appendChild(progress); }
   }
   if (data.kind === 'file') {
+    markReading();
     pending++; controls(); serial = serial.then(() => accept(data.blob)).catch(fail).finally(() => { pending--; controls(); });
   }
   if (data.kind === 'error') fail(new Error(data.message));
 });
 $('read').addEventListener('click', start);
 $('pause').addEventListener('click', () => { pause(); status('已暂停', '已保存的完整段保留。未完成段会在补收轮重新读取。'); });
-$('copy').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(B.mending(manifest, have)); status('待收短码已复制', '粘贴到源端并载入；先点击读取，再让源端开始补收轮。'); }
-  catch { $('mending').focus(); $('mending').select(); status('请复制选中的短码', '也可长按选中复制。'); }
-});
+async function copyMissing() {
+  if (!manifest || have.size === manifest.hashes.length) return;
+  const code = B.mending(manifest, have);
+  try { await navigator.clipboard.writeText(code); $('liveCode').hidden = true; status('待补短码已复制', reading ? '扫描继续。可在源端粘贴短码，播放指定待补段。' : '粘贴到源端，读取待补段即可。'); }
+  catch {
+    const field = reading || starting ? $('liveCode') : $('mending');
+    field.value = code; field.hidden = false; field.focus(); field.select();
+    status('请长按复制选中的短码', '当前浏览器没有自动复制权限，扫描不会因此暂停。');
+  }
+}
+$('copy').addEventListener('click', copyMissing);
+$('liveCopy').addEventListener('click', copyMissing);
+$('livePause').addEventListener('click', () => $('pause').click());
 $('other').addEventListener('click', async () => {
   if (reading || starting || merging || pending) return;
   resetEngine(); revokeOutput(); manifest = null; have.clear(); render(); await tasks(); status('选择任务，或读取新文件', '已保存任务没有删除。');
