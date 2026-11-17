@@ -194,6 +194,12 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
   function partLength(m, index) {
     return Math.max(0, Math.min(m.partSize, m.size - index * m.partSize));
   }
+  async function partIssue(m, index, blob) {
+    if (!blob) return '缓存中没有这一段';
+    if (blob.size !== partLength(m, index)) return '长度不符（' + blob.size + ' / ' + partLength(m, index) + ' B）';
+    try { return await hash(await blob.arrayBuffer()) === m.hashes[index] ? '' : '内容摘要不符'; }
+    catch { return '无法读取已保存内容'; }
+  }
   async function validate(m) {
     if (!m || typeof m.name !== 'string' || !m.name.length || m.name.length > 4096 ||
         typeof m.type !== 'string' || m.type.length > 256 ||
@@ -240,8 +246,9 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
     const m = await validate(h.manifest);
     if (!Number.isSafeInteger(h.index) || h.index < 0 || h.index >= m.hashes.length) throw new Error('分段序号超出清单范围。');
     const data = blob.slice(12 + length);
-    if (data.size !== partLength(m, h.index) || await hash(await data.arrayBuffer()) !== m.hashes[h.index]) {
-      const error = new Error('第' + (h.index + 1) + '段内容校验失败，已保留为待补。');
+    const issue = await partIssue(m, h.index, data);
+    if (issue) {
+      const error = new Error('第' + (h.index + 1) + '段内容校验失败：' + issue + '。');
       error.partIndex = h.index; error.taskId = m.id; throw error;
     }
     return { manifest: m, index: h.index, data };
@@ -251,15 +258,17 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
   }
   async function assemble(m, getPart, progress = () => {}) {
     await validate(m);
-    const blobs = [];
+    const blobs = [], invalid = [], issues = [];
     for (let i = 0; i < m.hashes.length; i++) {
       const blob = await getPart(i);
-      if (!blob || blob.size !== partLength(m, i) || await hash(await blob.arrayBuffer()) !== m.hashes[i]) {
-        const error = new Error('第' + (i + 1) + '段缺失或损坏，已保留为待补。');
-        error.partIndex = i; throw error;
-      }
-      blobs.push(blob);
+      const issue = await partIssue(m, i, blob);
+      if (issue) { invalid.push(i); issues.push({ index: i, reason: issue }); }
+      else blobs.push(blob);
       progress(i + 1, m.hashes.length);
+    }
+    if (invalid.length) {
+      const error = new Error('第' + ranges(invalid) + '段缺失或损坏，已保留为待补。');
+      error.partIndex = invalid[0]; error.partIndices = invalid; error.partIssues = issues; throw error;
     }
     const result = new Blob(blobs, { type: m.type || 'application/octet-stream' });
     if (result.size !== m.size) throw new Error('合并后大小不一致。');
@@ -297,7 +306,7 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
     }
     return [...result].sort((a, b) => a - b);
   }
-  root.KnitBatches = { hash, prepare, packet, unpack, assemble, validate, safeName, maxPart, ranges, mending, replay };
+  root.KnitBatches = { hash, prepare, packet, unpack, assemble, validate, partIssue, safeName, maxPart, ranges, mending, replay };
 })(globalThis);
 </script><script>(function (root) {
   'use strict';
@@ -365,9 +374,11 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
       });
     },
     async put(manifest, index, data) {
+      // Persist owned bytes, not a sliced Blob backed by the native download.
+      const bytes = await data.arrayBuffer();
       return transact(['tasks', 'parts'], 'readwrite', tx => {
         tx.objectStore('tasks').put({ id: manifest.id, manifest, updated: Date.now() });
-        tx.objectStore('parts').put({ id: manifest.id, index, data });
+        tx.objectStore('parts').put({ id: manifest.id, index, data: bytes });
       });
     },
     async indices(id) {
@@ -379,7 +390,10 @@ canvas#canvas { position: absolute; inset: 0; width: 100% !important; height: 10
     async part(id, index) {
       return transact(['parts'], 'readonly', tx => {
         const request = tx.objectStore('parts').get([id, index]);
-        return () => request.result && request.result.data;
+        return () => {
+          const data = request.result && request.result.data;
+          return data == null || data instanceof Blob ? data : new Blob([data]);
+        };
       });
     },
     async dropPart(id, index) {
@@ -404,7 +418,7 @@ let engineReady = false, engineRequested = false, outputURL = null, serial = Pro
 let nativeEpoch = 0;
 function status(title, hint, error = false) {
   $('stateTitle').textContent = title; $('stateHint').textContent = hint; $('status').dataset.error = error;
-  $('liveNotice').textContent = title; $('liveNotice').dataset.error = error;
+  $('liveNotice').textContent = title + (error ? '：' + hint : ''); $('liveNotice').dataset.error = error;
 }
 function controls() {
   const done = manifest && have.size === manifest.hashes.length;
@@ -512,8 +526,12 @@ async function merge() {
     status('已收齐，保存原文件', '全部分段的内容、顺序和大小已校验通过。');
   } catch (error) {
     if (!Number.isSafeInteger(error.partIndex) || error.partIndex < 0 || error.partIndex >= manifest.hashes.length) throw error;
-    have.delete(error.partIndex); render(); await KnitStore.dropPart(manifest.id, error.partIndex);
-    status('需要补收第' + (error.partIndex + 1) + '段', reading ? '其余已保存段保留，相机继续读取。' : '其余已保存段保留，可复制待补短码后继续读取。', true);
+    const indices = error.partIndices || [error.partIndex];
+    for (const index of indices) have.delete(index);
+    render();
+    for (const index of indices) await KnitStore.dropPart(manifest.id, index);
+    const detail = (error.partIssues || []).slice(0, 3).map(issue => '第' + (issue.index + 1) + '段' + issue.reason).join('；');
+    status('需要补收第' + B.ranges(indices) + '段', detail + '。其余段保留。' + (reading ? '相机继续读取。' : '可复制待补短码继续读取。'), true);
   } finally { merging = false; controls(); }
 }
 async function accept(blob) {
@@ -527,7 +545,15 @@ async function accept(blob) {
     status('不是当前任务', '当前任务没有改变。请播放当前文件的待收段，或暂停后切换任务。', true); return false;
   }
   if (!manifest) { manifest = value.manifest; revokeOutput(); have = new Set(await KnitStore.indices(manifest.id)); }
-  if (!have.has(value.index)) { await KnitStore.put(manifest, value.index, value.data); have.add(value.index); }
+  if (!have.has(value.index)) {
+    await KnitStore.put(manifest, value.index, value.data);
+    const issue = await B.partIssue(manifest, value.index, await KnitStore.part(manifest.id, value.index));
+    if (issue) {
+      await KnitStore.dropPart(manifest.id, value.index); render();
+      status('第' + (value.index + 1) + '段保存校验未通过', issue + '。未计入已保存，其他段保留。', true); return false;
+    }
+    have.add(value.index);
+  }
   $('tasks').hidden = true; render();
   status('第' + (value.index + 1) + '段已保存', reading ? '等待源端自动切到下一段。本轮结束后可复制待收短码补收。' : '点击读取继续，或复制待收短码到源端。');
   if (have.size === manifest.hashes.length) await merge(); return true;
